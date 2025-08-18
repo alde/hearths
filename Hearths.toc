@@ -1,0 +1,8 @@
+## Interface: 110200
+## Title: Hearths
+## Version: 0.1
+## Notes: Hearthstone Rotation
+## Author: Your Name
+## SavedVariables: HearthsDB
+
+Hearths.lua

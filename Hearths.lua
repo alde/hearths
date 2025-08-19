@@ -7,8 +7,16 @@ local hearthstoneToys = {}
 local pendingRotation = false
 local lastCooldownCheck = 0
 
+-- Debug print function
+local function DebugPrint(msg)
+    if HearthsDB and HearthsDB.debug then
+        print("|cFF888888[Hearths Debug]|r " .. msg)
+    end
+end
+
 -- Initialize SavedVariables
 local function InitializeSavedVars()
+    local wasNew = HearthsDB == nil
     HearthsDB = HearthsDB or {}
     HearthsDB.position = HearthsDB.position or { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }
     HearthsDB.debug = HearthsDB.debug or false
@@ -16,12 +24,11 @@ local function InitializeSavedVars()
         HearthsDB.useAllHearthstones = true
     end
     HearthsDB.enabledHearthstones = HearthsDB.enabledHearthstones or {}
-end
 
--- Debug print function
-local function DebugPrint(msg)
-    if HearthsDB and HearthsDB.debug then
-        print("|cFF888888[Hearths Debug]|r " .. msg)
+    if wasNew then
+        DebugPrint("SavedVariables initialized for first time - useAllHearthstones: " .. tostring(HearthsDB.useAllHearthstones))
+    else
+        DebugPrint("SavedVariables loaded - useAllHearthstones: " .. tostring(HearthsDB.useAllHearthstones) .. ", enabledHearthstones count: " .. tostring(#HearthsDB.enabledHearthstones))
     end
 end
 
@@ -71,6 +78,32 @@ local function GetRemainingCooldown(hearthstone)
     return 0
 end
 
+-- Function to validate that initialization was successful
+local function ValidateInitialization()
+    -- Check if any hearthstones were found
+    if #hearthstoneToys == 0 then
+        DebugPrint("Validation failed: No hearthstones found")
+        return false
+    end
+
+    -- Check if at least one hearthstone is enabled
+    local hasEnabledHearthstone = false
+    for _, hearthstone in ipairs(hearthstoneToys) do
+        if IsHearthstoneEnabled(hearthstone) then
+            hasEnabledHearthstone = true
+            break
+        end
+    end
+
+    if not hasEnabledHearthstone then
+        DebugPrint("Validation failed: No enabled hearthstones found")
+        return false
+    end
+
+    DebugPrint("Validation passed: " .. #hearthstoneToys .. " hearthstones found, at least one enabled")
+    return true
+end
+
 -- Function to update button attributes for a specific hearthstone
 local function UpdateButtonForHearthstone(hearthstone)
     -- Set up modifier keys for Dalaran and Garrison hearthstones
@@ -102,9 +135,7 @@ end
 
 -- Create a working hearthstone button using the pattern that works
 local function CreateHearthstoneButton()
-    -- Scan for hearthstones first
-    ScanHearthstoneToys()
-
+    -- Note: ScanHearthstoneToys() should be called before this function
     if #hearthstoneToys == 0 then
         DebugPrint("No hearthstone toys found!")
         return
@@ -164,12 +195,22 @@ local function CreateHearthstoneButton()
 
 
     -- Set up the button for the current hearthstone
-    UpdateButtonForHearthstone(currentHearthstone)
+    if currentHearthstone then
+        UpdateButtonForHearthstone(currentHearthstone)
+        DebugPrint("Button configured for: " .. currentHearthstone.name)
+    else
+        DebugPrint("ERROR: No hearthstone selected, cannot configure button")
+        return
+    end
 
     -- Custom tooltip with modifier information
     frame:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(currentHearthstone.name, 1, 1, 1, 1)
+        if currentHearthstone then
+            GameTooltip:AddLine(currentHearthstone.name, 1, 1, 1, 1)
+        else
+            GameTooltip:AddLine("Hearths (No hearthstone selected)", 1, 0.5, 0.5, 1)
+        end
         GameTooltip:AddLine(" ")
         if PlayerHasToy(140192) then
             GameTooltip:AddLine("Shift-click: Dalaran Hearthstone", 0.7, 0.7, 1, 1)
@@ -267,6 +308,306 @@ local function CreateHearthstoneButton()
     DebugPrint("Created button for: " .. currentHearthstone.name .. " (ID: " .. currentHearthstone.id .. ")")
 end
 
+-- Create a hidden tooltip for scanning item descriptions
+local scanningTooltip = CreateFrame("GameTooltip", "HearthsScanningTooltip", UIParent, "GameTooltipTemplate")
+scanningTooltip:SetOwner(UIParent, "ANCHOR_NONE") -- Ensures it's hidden
+
+-- Function to get item description using GameTooltip
+local function GetItemDescription(itemID)
+    scanningTooltip:ClearLines()
+    scanningTooltip:SetHyperlink("item:" .. itemID)
+
+    local descriptionText = ""
+    local numLines = scanningTooltip:NumLines()
+
+    for i = 1, numLines do
+        local line = _G["HearthsScanningTooltipTextLeft" .. i]
+        if line and line:GetText() then
+            local text = line:GetText()
+            -- Skip the item name line and focus on description lines
+            if i > 1 then -- Skip first line (item name)
+                descriptionText = descriptionText .. text .. " "
+            end
+        end
+    end
+
+    scanningTooltip:ClearLines()
+    return descriptionText
+end
+
+-- Scan for hearthstone toys the player owns
+function ScanHearthstoneToys()
+    DebugPrint("Starting hearthstone scan...")
+    hearthstoneToys = {}
+
+    -- Add the default hearthstone
+    local defaultHearthstone = {
+        id = 6948,
+        name = "Hearthstone",
+        icon = "Interface\\Icons\\INV_Misc_Rune_01",
+        type = "item"
+    }
+    table.insert(hearthstoneToys, defaultHearthstone)
+    DebugPrint("Added to rotation: " .. defaultHearthstone.name)
+
+    -- Dalaran Hearthstone is available via Shift-click but not in regular rotation
+
+    -- Garrison Hearthstone is available via Ctrl-click but not in regular rotation
+
+    -- Add Astral Recall if player is a Shaman
+    local _, playerClass = UnitClass("player")
+    if playerClass == "SHAMAN" then
+        local astralRecall = {
+            id = 556, -- Astral Recall spell ID
+            name = "Astral Recall",
+            icon = "Interface\\Icons\\Spell_Nature_AstralRecal",
+            type = "spell"
+        }
+        table.insert(hearthstoneToys, astralRecall)
+        DebugPrint("Added to rotation: " .. astralRecall.name)
+    end
+
+    -- Scan toy box for hearthstone toys
+    local numToys = C_ToyBox.GetNumFilteredToys()
+    DebugPrint("Scanning " .. numToys .. " toys in toy box...")
+    for i = 1, numToys do
+        local toyID = C_ToyBox.GetToyFromIndex(i)
+        if toyID and toyID > 0 and C_ToyBox.IsToyUsable(toyID) then
+            local itemID, toyName, icon = C_ToyBox.GetToyInfo(toyID)
+
+            if toyName and type(toyName) == "string" then
+                -- Get the item description using the GameTooltip method
+                local description = GetItemDescription(toyID)
+
+                -- Check for multiple hearthstone description patterns
+                local isHearthstone = false
+                if string.find(description, "Speak to an Innkeeper in a different place to change your home location") then
+                    isHearthstone = true
+                elseif string.find(description, "Return to your home location") then
+                    isHearthstone = true
+                elseif string.find(description, "Return to your hearth") then
+                    isHearthstone = true
+                elseif string.find(description, "Return to your inn") then
+                    isHearthstone = true
+                elseif string.find(description, "Return to your home") then
+                    isHearthstone = true
+                elseif string.find(description, "Use: Return to your home") then
+                    isHearthstone = true
+                elseif string.find(description, "Use: Return to your hearth") then
+                    isHearthstone = true
+                end
+
+                if isHearthstone then
+                    local hearthstoneToy = {
+                        id = toyID,
+                        name = toyName,
+                        icon = icon,
+                        type = "toy"
+                    }
+                    table.insert(hearthstoneToys, hearthstoneToy)
+                    DebugPrint("Added to rotation: " .. hearthstoneToy.name)
+                end
+            end
+        end
+    end
+
+    DebugPrint("Found " .. #hearthstoneToys .. " usable hearthstones")
+end
+
+-- Create options panel with custom frame and proper icons
+local function CreateOptionsPanel()
+    local panel = CreateFrame("Frame", "HearthsOptionsPanel", UIParent)
+    panel.name = "Hearths"
+
+    -- Title
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Hearths Options")
+
+    -- Debug Mode checkbox
+    local debugCheckbox = CreateFrame("CheckButton", "HearthsDebugCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    debugCheckbox:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -20)
+    debugCheckbox.Text:SetText("Enable Debug Logging")
+    debugCheckbox:SetScript("OnClick", function(self)
+        HearthsDB.debug = self:GetChecked()
+        local status = self:GetChecked() and "enabled" or "disabled"
+        print("|cFF00FF00[Hearths]|r Debug logging " .. status)
+    end)
+
+    -- Use All Hearthstones checkbox
+    local useAllCheckbox = CreateFrame("CheckButton", "HearthsUseAllCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    useAllCheckbox:SetPoint("TOPLEFT", debugCheckbox, "BOTTOMLEFT", 0, -10)
+    useAllCheckbox.Text:SetText("Use All Hearthstones")
+    useAllCheckbox:SetScript("OnClick", function(self)
+        HearthsDB.useAllHearthstones = self:GetChecked()
+        if HearthsDB.useAllHearthstones then
+            DebugPrint("Enabled all hearthstones for rotation")
+            -- Enable and check all individual checkboxes
+            for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
+                checkbox:SetChecked(true)
+                checkbox:SetEnabled(false)
+            end
+        else
+            DebugPrint("Switched to custom hearthstone selection")
+            -- Enable individual checkboxes and set them based on saved state
+            for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
+                checkbox:SetEnabled(true)
+                checkbox:SetChecked(HearthsDB.enabledHearthstones[checkbox.hearthstoneId] == true)
+            end
+        end
+
+        -- If current hearthstone is no longer enabled, find a new one
+        if currentHearthstone and not IsHearthstoneEnabled(currentHearthstone) then
+            SetupRandomHearthstone()
+        end
+    end)
+
+    -- Header for individual selections
+    local customHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    customHeader:SetPoint("TOPLEFT", useAllCheckbox, "BOTTOMLEFT", 0, -20)
+    customHeader:SetText("Individual Hearthstone Selection:")
+
+    -- Container for individual hearthstone checkboxes
+    panel.hearthstoneCheckboxes = {}
+
+    -- Create scrollable frame for hearthstone list
+    local scrollFrame = CreateFrame("ScrollFrame", "HearthsScrollFrame", panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", customHeader, "BOTTOMLEFT", 0, -10)
+    scrollFrame:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -30, 20)
+    scrollFrame:SetSize(400, 200)
+
+    local scrollChild = CreateFrame("Frame", "HearthsScrollChild", scrollFrame)
+    scrollChild:SetSize(380, 1) -- Height will be set dynamically
+    scrollFrame:SetScrollChild(scrollChild)
+
+    local function RefreshHearthstoneList()
+        -- Clear existing checkboxes
+        for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
+            checkbox:Hide()
+            checkbox:SetParent(nil)
+        end
+        panel.hearthstoneCheckboxes = {}
+
+        -- If switching to custom mode for the first time, initialize all as enabled
+        if not HearthsDB.useAllHearthstones and not next(HearthsDB.enabledHearthstones) then
+            for _, hearthstone in ipairs(hearthstoneToys) do
+                HearthsDB.enabledHearthstones[hearthstone.id] = true
+            end
+        end
+
+        -- Create checkboxes for each hearthstone in scroll child
+        local yOffset = -10
+        for i, hearthstone in ipairs(hearthstoneToys) do
+            -- Create a container frame for the checkbox + icon
+            local container = CreateFrame("Frame", "HearthsContainer" .. i, scrollChild)
+            container:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 20, yOffset)
+            container:SetSize(350, 25)
+
+            -- Create icon
+            local icon = container:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(20, 20)
+            icon:SetPoint("LEFT", container, "LEFT", 0, 0)
+            icon:SetTexture(hearthstone.icon)
+
+            -- Create checkbox
+            local checkbox = CreateFrame("CheckButton", "HearthsCheckbox" .. i, container, "InterfaceOptionsCheckButtonTemplate")
+            checkbox:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+            checkbox.Text:SetText(hearthstone.name)
+            checkbox.hearthstoneId = hearthstone.id
+
+            checkbox:SetScript("OnClick", function(self)
+                if not HearthsDB.useAllHearthstones then
+                    HearthsDB.enabledHearthstones[hearthstone.id] = self:GetChecked()
+                    local status = self:GetChecked() and "enabled" or "disabled"
+                    DebugPrint(hearthstone.name .. " " .. status)
+
+                    -- Check if all are now enabled
+                    local allEnabled = true
+                    for _, h in ipairs(hearthstoneToys) do
+                        if not HearthsDB.enabledHearthstones[h.id] then
+                            allEnabled = false
+                            break
+                        end
+                    end
+                    if allEnabled then
+                        HearthsDB.useAllHearthstones = true
+                        useAllCheckbox:SetChecked(true)
+                        for _, cb in pairs(panel.hearthstoneCheckboxes) do
+                            cb:SetChecked(true)
+                            cb:SetEnabled(false)
+                        end
+                        DebugPrint("All hearthstones enabled, switched back to 'Use All' mode")
+                    end
+
+                    -- If current hearthstone was disabled, find a new one
+                    if currentHearthstone and not self:GetChecked() and hearthstone.id == currentHearthstone.id then
+                        SetupRandomHearthstone()
+                    end
+                end
+            end)
+
+            panel.hearthstoneCheckboxes[i] = checkbox
+            yOffset = yOffset - 30
+        end
+
+        -- Set scroll child height based on content
+        scrollChild:SetHeight(math.max(200, #hearthstoneToys * 30 + 20))
+
+        -- Set initial states
+        debugCheckbox:SetChecked(HearthsDB.debug)
+        useAllCheckbox:SetChecked(HearthsDB.useAllHearthstones)
+        for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
+            if HearthsDB.useAllHearthstones then
+                checkbox:SetChecked(true)
+                checkbox:SetEnabled(false)
+            else
+                checkbox:SetChecked(HearthsDB.enabledHearthstones[checkbox.hearthstoneId] == true)
+                checkbox:SetEnabled(true)
+            end
+        end
+    end
+
+    panel.RefreshHearthstoneList = RefreshHearthstoneList
+
+    local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+    Settings.RegisterAddOnCategory(category)
+    panel.category = category
+
+    return panel
+end
+
+-- Retry mechanism for initialization
+local initializationRetries = 0
+local maxRetries = 3
+
+local function AttemptInitialization()
+    initializationRetries = initializationRetries + 1
+    DebugPrint("Initialization attempt " .. initializationRetries .. "/" .. maxRetries)
+
+    -- Scan for hearthstones first
+    ScanHearthstoneToys()
+
+    -- Validate that we have usable hearthstones
+    if ValidateInitialization() then
+        DebugPrint("Initialization successful, creating button")
+        CreateHearthstoneButton()
+        if not optionsPanel then
+            optionsPanel = CreateOptionsPanel()
+            -- Refresh the hearthstone list after scanning
+            if optionsPanel.RefreshHearthstoneList then
+                optionsPanel.RefreshHearthstoneList()
+            end
+        end
+    else
+        if initializationRetries < maxRetries then
+            DebugPrint("Initialization failed, retrying in 3 seconds...")
+            C_Timer.After(3, AttemptInitialization)
+        else
+            DebugPrint("Initialization failed after " .. maxRetries .. " attempts. Toy box or SavedVariables may not be ready.")
+        end
+    end
+end
+
 -- Function to set up a new random hearthstone for the existing button
 function SetupRandomHearthstone()
     if not frame or #hearthstoneToys == 0 then
@@ -319,290 +660,18 @@ function SetupRandomHearthstone()
     DebugPrint("Switched to: " .. currentHearthstone.name .. " (ID: " .. currentHearthstone.id .. ")")
 end
 
--- Create a hidden tooltip for scanning item descriptions
-local scanningTooltip = CreateFrame("GameTooltip", "HearthsScanningTooltip", UIParent, "GameTooltipTemplate")
-scanningTooltip:SetOwner(UIParent, "ANCHOR_NONE") -- Ensures it's hidden
-
--- Function to get item description using GameTooltip
-local function GetItemDescription(itemID)
-    scanningTooltip:ClearLines()
-    scanningTooltip:SetHyperlink("item:" .. itemID)
-
-    local descriptionText = ""
-    local numLines = scanningTooltip:NumLines()
-
-    for i = 1, numLines do
-        local line = _G["HearthsScanningTooltipTextLeft" .. i]
-        if line and line:GetText() then
-            local text = line:GetText()
-            -- Skip the item name line and focus on description lines
-            if i > 1 then -- Skip first line (item name)
-                descriptionText = descriptionText .. text .. " "
-            end
-        end
-    end
-
-    scanningTooltip:ClearLines()
-    return descriptionText
-end
-
--- Scan for hearthstone toys the player owns
-function ScanHearthstoneToys()
-    hearthstoneToys = {}
-
-    -- Add the default hearthstone
-    local defaultHearthstone = {
-        id = 6948,
-        name = "Hearthstone",
-        icon = "Interface\\Icons\\INV_Misc_Rune_01",
-        type = "item"
-    }
-    table.insert(hearthstoneToys, defaultHearthstone)
-    DebugPrint("Added to rotation: " .. defaultHearthstone.name)
-
-    -- Dalaran Hearthstone is available via Shift-click but not in regular rotation
-
-    -- Garrison Hearthstone is available via Ctrl-click but not in regular rotation
-
-    -- Add Astral Recall if player is a Shaman
-    local _, playerClass = UnitClass("player")
-    if playerClass == "SHAMAN" then
-        local astralRecall = {
-            id = 556, -- Astral Recall spell ID
-            name = "Astral Recall",
-            icon = "Interface\\Icons\\Spell_Nature_AstralRecal",
-            type = "spell"
-        }
-        table.insert(hearthstoneToys, astralRecall)
-        DebugPrint("Added to rotation: " .. astralRecall.name)
-    end
-
-    -- Scan toy box for hearthstone toys
-    local numToys = C_ToyBox.GetNumFilteredToys()
-    for i = 1, numToys do
-        local toyID = C_ToyBox.GetToyFromIndex(i)
-        if toyID and toyID > 0 and C_ToyBox.IsToyUsable(toyID) then
-            local itemID, toyName, icon = C_ToyBox.GetToyInfo(toyID)
-
-            if toyName and type(toyName) == "string" then
-                -- Get the item description using the GameTooltip method
-                local description = GetItemDescription(toyID)
-
-                -- Check for multiple hearthstone description patterns
-                local isHearthstone = false
-                if string.find(description, "Speak to an Innkeeper in a different place to change your home location") then
-                    isHearthstone = true
-                elseif string.find(description, "Return to your home location") then
-                    isHearthstone = true
-                elseif string.find(description, "Return to your hearth") then
-                    isHearthstone = true
-                elseif string.find(description, "Return to your inn") then
-                    isHearthstone = true
-                elseif string.find(description, "Return to your home") then
-                    isHearthstone = true
-                elseif string.find(description, "Use: Return to your home") then
-                    isHearthstone = true
-                elseif string.find(description, "Use: Return to your hearth") then
-                    isHearthstone = true
-                end
-
-                if isHearthstone then
-                    local hearthstoneToy = {
-                        id = toyID,
-                        name = toyName,
-                        icon = icon,
-                        type = "toy"
-                    }
-                    table.insert(hearthstoneToys, hearthstoneToy)
-                    DebugPrint("Added to rotation: " .. hearthstoneToy.name)
-                end
-            end
-        end
-    end
-
-    DebugPrint("Found " .. #hearthstoneToys .. " usable hearthstones")
-end
-
--- Create options panel with custom frame and proper icons
-local function CreateOptionsPanel()
-    local panel = CreateFrame("Frame", "HearthsOptionsPanel", UIParent)
-    panel.name = "Hearths"
-    
-    -- Title
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Hearths Options")
-    
-    -- Debug Mode checkbox
-    local debugCheckbox = CreateFrame("CheckButton", "HearthsDebugCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
-    debugCheckbox:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -20)
-    debugCheckbox.Text:SetText("Enable Debug Logging")
-    debugCheckbox:SetScript("OnClick", function(self)
-        HearthsDB.debug = self:GetChecked()
-        local status = self:GetChecked() and "enabled" or "disabled"
-        print("|cFF00FF00[Hearths]|r Debug logging " .. status)
-    end)
-    
-    -- Use All Hearthstones checkbox
-    local useAllCheckbox = CreateFrame("CheckButton", "HearthsUseAllCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
-    useAllCheckbox:SetPoint("TOPLEFT", debugCheckbox, "BOTTOMLEFT", 0, -10)
-    useAllCheckbox.Text:SetText("Use All Hearthstones")
-    useAllCheckbox:SetScript("OnClick", function(self)
-        HearthsDB.useAllHearthstones = self:GetChecked()
-        if HearthsDB.useAllHearthstones then
-            DebugPrint("Enabled all hearthstones for rotation")
-            -- Enable and check all individual checkboxes
-            for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
-                checkbox:SetChecked(true)
-                checkbox:SetEnabled(false)
-            end
-        else
-            DebugPrint("Switched to custom hearthstone selection")
-            -- Enable individual checkboxes and set them based on saved state
-            for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
-                checkbox:SetEnabled(true)
-                checkbox:SetChecked(HearthsDB.enabledHearthstones[checkbox.hearthstoneId] == true)
-            end
-        end
-        
-        -- If current hearthstone is no longer enabled, find a new one
-        if currentHearthstone and not IsHearthstoneEnabled(currentHearthstone) then
-            SetupRandomHearthstone()
-        end
-    end)
-    
-    -- Header for individual selections
-    local customHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    customHeader:SetPoint("TOPLEFT", useAllCheckbox, "BOTTOMLEFT", 0, -20)
-    customHeader:SetText("Individual Hearthstone Selection:")
-    
-    -- Container for individual hearthstone checkboxes
-    panel.hearthstoneCheckboxes = {}
-    
-    -- Create scrollable frame for hearthstone list
-    local scrollFrame = CreateFrame("ScrollFrame", "HearthsScrollFrame", panel, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", customHeader, "BOTTOMLEFT", 0, -10)
-    scrollFrame:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -30, 20)
-    scrollFrame:SetSize(400, 200)
-    
-    local scrollChild = CreateFrame("Frame", "HearthsScrollChild", scrollFrame)
-    scrollChild:SetSize(380, 1) -- Height will be set dynamically
-    scrollFrame:SetScrollChild(scrollChild)
-    
-    local function RefreshHearthstoneList()
-        -- Clear existing checkboxes
-        for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
-            checkbox:Hide()
-            checkbox:SetParent(nil)
-        end
-        panel.hearthstoneCheckboxes = {}
-        
-        -- If switching to custom mode for the first time, initialize all as enabled
-        if not HearthsDB.useAllHearthstones and not next(HearthsDB.enabledHearthstones) then
-            for _, hearthstone in ipairs(hearthstoneToys) do
-                HearthsDB.enabledHearthstones[hearthstone.id] = true
-            end
-        end
-        
-        -- Create checkboxes for each hearthstone in scroll child
-        local yOffset = -10
-        for i, hearthstone in ipairs(hearthstoneToys) do
-            -- Create a container frame for the checkbox + icon
-            local container = CreateFrame("Frame", "HearthsContainer" .. i, scrollChild)
-            container:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 20, yOffset)
-            container:SetSize(350, 25)
-            
-            -- Create icon
-            local icon = container:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(20, 20)
-            icon:SetPoint("LEFT", container, "LEFT", 0, 0)
-            icon:SetTexture(hearthstone.icon)
-            
-            -- Create checkbox
-            local checkbox = CreateFrame("CheckButton", "HearthsCheckbox" .. i, container, "InterfaceOptionsCheckButtonTemplate")
-            checkbox:SetPoint("LEFT", icon, "RIGHT", 5, 0)
-            checkbox.Text:SetText(hearthstone.name)
-            checkbox.hearthstoneId = hearthstone.id
-            
-            checkbox:SetScript("OnClick", function(self)
-                if not HearthsDB.useAllHearthstones then
-                    HearthsDB.enabledHearthstones[hearthstone.id] = self:GetChecked()
-                    local status = self:GetChecked() and "enabled" or "disabled"
-                    DebugPrint(hearthstone.name .. " " .. status)
-                    
-                    -- Check if all are now enabled
-                    local allEnabled = true
-                    for _, h in ipairs(hearthstoneToys) do
-                        if not HearthsDB.enabledHearthstones[h.id] then
-                            allEnabled = false
-                            break
-                        end
-                    end
-                    if allEnabled then
-                        HearthsDB.useAllHearthstones = true
-                        useAllCheckbox:SetChecked(true)
-                        for _, cb in pairs(panel.hearthstoneCheckboxes) do
-                            cb:SetChecked(true)
-                            cb:SetEnabled(false)
-                        end
-                        DebugPrint("All hearthstones enabled, switched back to 'Use All' mode")
-                    end
-                    
-                    -- If current hearthstone was disabled, find a new one
-                    if currentHearthstone and not self:GetChecked() and hearthstone.id == currentHearthstone.id then
-                        SetupRandomHearthstone()
-                    end
-                end
-            end)
-            
-            panel.hearthstoneCheckboxes[i] = checkbox
-            yOffset = yOffset - 30
-        end
-        
-        -- Set scroll child height based on content
-        scrollChild:SetHeight(math.max(200, #hearthstoneToys * 30 + 20))
-        
-        -- Set initial states
-        debugCheckbox:SetChecked(HearthsDB.debug)
-        useAllCheckbox:SetChecked(HearthsDB.useAllHearthstones)
-        for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
-            if HearthsDB.useAllHearthstones then
-                checkbox:SetChecked(true)
-                checkbox:SetEnabled(false)
-            else
-                checkbox:SetChecked(HearthsDB.enabledHearthstones[checkbox.hearthstoneId] == true)
-                checkbox:SetEnabled(true)
-            end
-        end
-    end
-    
-    panel.RefreshHearthstoneList = RefreshHearthstoneList
-    
-    local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
-    Settings.RegisterAddOnCategory(category)
-    panel.category = category
-    
-    return panel
-end
-
 -- Initialize the addon
 local eventFrame = CreateFrame("Frame")
 local optionsPanel = nil
-eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("LOADING_SCREEN_DISABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
-    if event == "PLAYER_LOGIN" then
+    if event == "ADDON_LOADED" and arg1 == addonName then
+        DebugPrint("Addon loaded, initializing SavedVariables")
         InitializeSavedVars()
-        C_Timer.After(1, function()
-            CreateHearthstoneButton()
-            optionsPanel = CreateOptionsPanel()
-            -- Refresh the hearthstone list after scanning
-            if optionsPanel.RefreshHearthstoneList then
-                optionsPanel.RefreshHearthstoneList()
-            end
-        end)
+        C_Timer.After(1, AttemptInitialization)
     elseif (event == "LOADING_SCREEN_DISABLED" or event == "UNIT_SPELLCAST_STOP") and pendingRotation then
         -- Loading screen ended, delay rotation to ensure cooldowns are updated
         C_Timer.After(2.0, function()

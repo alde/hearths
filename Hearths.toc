@@ -1,6 +1,6 @@
 ## Interface: 110200
 ## Title: Hearths
-## Version: 0.1
+## Version: 0.2
 ## Notes: Hearthstone Rotation
 ## Author: Your Name
 ## SavedVariables: HearthsDB

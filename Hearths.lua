@@ -2,7 +2,6 @@
 local addonName, addon = ...
 local frame = nil
 local cooldownFrame = nil
-local cooldownText = nil
 local currentHearthstone = nil
 local hearthstoneToys = {}
 local pendingRotation = false
@@ -148,10 +147,6 @@ local function CreateHearthstoneButton()
     cooldownFrame:SetAllPoints(frame)
     cooldownFrame:SetDrawBling(false)
 
-    -- Create cooldown text
-    cooldownText = cooldownFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cooldownText:SetPoint("CENTER", cooldownFrame, "CENTER")
-    cooldownText:SetTextColor(1, 1, 1)
 
     -- Set up the button for the current hearthstone
     UpdateButtonForHearthstone(currentHearthstone)
@@ -220,19 +215,9 @@ local function CreateHearthstoneButton()
             local startTime, duration = GetCooldownInfo(currentHearthstone)
             if duration > 0 then
                 cooldownFrame:SetCooldown(startTime, duration)
-                local remaining = GetRemainingCooldown(currentHearthstone)
-                if remaining > 0 then
-                    if remaining > 60 then
-                        cooldownText:SetText(string.format("%.0fm", remaining / 60))
-                    else
-                        cooldownText:SetText(string.format("%.0f", remaining))
-                    end
-                else
-                    cooldownText:SetText("")
-                end
+                -- Cooldown text removed - game already displays this
             else
                 cooldownFrame:Clear()
-                cooldownText:SetText("")
             end
         end
     end)

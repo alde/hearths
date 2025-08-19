@@ -12,6 +12,10 @@ local function InitializeSavedVars()
     HearthsDB = HearthsDB or {}
     HearthsDB.position = HearthsDB.position or { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }
     HearthsDB.debug = HearthsDB.debug or false
+    if HearthsDB.useAllHearthstones == nil then
+        HearthsDB.useAllHearthstones = true
+    end
+    HearthsDB.enabledHearthstones = HearthsDB.enabledHearthstones or {}
 end
 
 -- Debug print function
@@ -19,6 +23,14 @@ local function DebugPrint(msg)
     if HearthsDB and HearthsDB.debug then
         print("|cFF888888[Hearths Debug]|r " .. msg)
     end
+end
+
+-- Function to check if a hearthstone is enabled for rotation
+local function IsHearthstoneEnabled(hearthstone)
+    if HearthsDB.useAllHearthstones then
+        return true
+    end
+    return HearthsDB.enabledHearthstones[hearthstone.id] == true
 end
 
 -- Function to get cooldown information for different types
@@ -103,24 +115,27 @@ local function CreateHearthstoneButton()
     DebugPrint("Initial cooldown check for all hearthstones:")
     for _, hearthstone in ipairs(hearthstoneToys) do
         local onCooldown = IsOnCooldown(hearthstone)
+        local enabled = IsHearthstoneEnabled(hearthstone)
         local remaining = GetRemainingCooldown(hearthstone)
-        DebugPrint("  " .. hearthstone.name .. ": " .. (onCooldown and ("on cooldown (" .. math.floor(remaining) .. "s)") or "available"))
-        if not onCooldown then
+        DebugPrint("  " .. hearthstone.name .. ": " .. (onCooldown and ("on cooldown (" .. math.floor(remaining) .. "s)") or "available") .. (enabled and "" or " (disabled)"))
+        if not onCooldown and enabled then
             table.insert(availableHearthstones, hearthstone)
         end
     end
 
-    -- If no hearthstones are available, find the one with shortest cooldown
+    -- If no hearthstones are available, find the enabled one with shortest cooldown
     if #availableHearthstones == 0 then
-        DebugPrint("All hearthstones on cooldown at startup, finding shortest cooldown")
+        DebugPrint("All enabled hearthstones on cooldown at startup, finding shortest cooldown")
         local shortestCooldown = nil
         local shortestTime = math.huge
 
         for _, hearthstone in ipairs(hearthstoneToys) do
-            local remaining = GetRemainingCooldown(hearthstone)
-            if remaining < shortestTime then
-                shortestTime = remaining
-                shortestCooldown = hearthstone
+            if IsHearthstoneEnabled(hearthstone) then
+                local remaining = GetRemainingCooldown(hearthstone)
+                if remaining < shortestTime then
+                    shortestTime = remaining
+                    shortestCooldown = hearthstone
+                end
             end
         end
 
@@ -207,7 +222,7 @@ local function CreateHearthstoneButton()
         end
     end)
 
-    -- Update cooldown display (throttled to 1 second intervals)
+    -- Update cooldown display and check for available hearthstones (throttled to 1 second intervals)
     frame:SetScript("OnUpdate", function(self, elapsed)
         lastCooldownCheck = lastCooldownCheck + elapsed
         if lastCooldownCheck >= 1.0 and currentHearthstone then
@@ -215,7 +230,28 @@ local function CreateHearthstoneButton()
             local startTime, duration = GetCooldownInfo(currentHearthstone)
             if duration > 0 then
                 cooldownFrame:SetCooldown(startTime, duration)
-                -- Cooldown text removed - game already displays this
+                -- Current hearthstone is on cooldown, check if any others are available
+                -- But only if we're not currently casting something
+                if not UnitCastingInfo("player") and not UnitChannelInfo("player") then
+                    local availableHearthstones = {}
+                    for _, hearthstone in ipairs(hearthstoneToys) do
+                        if IsHearthstoneEnabled(hearthstone) and not IsOnCooldown(hearthstone) then
+                            table.insert(availableHearthstones, hearthstone)
+                        end
+                    end
+
+                    -- If we found available hearthstones, switch to one
+                    if #availableHearthstones > 0 then
+                        local randomIndex = math.random(1, #availableHearthstones)
+                        local newHearthstone = availableHearthstones[randomIndex]
+                        if newHearthstone.id ~= currentHearthstone.id then
+                            currentHearthstone = newHearthstone
+                            UpdateButtonForHearthstone(currentHearthstone)
+                            cooldownFrame:Clear()
+                            DebugPrint("Switched to available hearthstone: " .. currentHearthstone.name)
+                        end
+                    end
+                end
             else
                 cooldownFrame:Clear()
             end
@@ -237,29 +273,32 @@ function SetupRandomHearthstone()
         return
     end
 
-    -- Filter out hearthstones that are on cooldown
+    -- Filter out hearthstones that are on cooldown or disabled
     local availableHearthstones = {}
     DebugPrint("Checking cooldowns for all hearthstones:")
     for _, hearthstone in ipairs(hearthstoneToys) do
         local onCooldown = IsOnCooldown(hearthstone)
+        local enabled = IsHearthstoneEnabled(hearthstone)
         local remaining = GetRemainingCooldown(hearthstone)
-        DebugPrint("  " .. hearthstone.name .. ": " .. (onCooldown and ("on cooldown (" .. math.floor(remaining) .. "s)") or "available"))
-        if not onCooldown then
+        DebugPrint("  " .. hearthstone.name .. ": " .. (onCooldown and ("on cooldown (" .. math.floor(remaining) .. "s)") or "available") .. (enabled and "" or " (disabled)"))
+        if not onCooldown and enabled then
             table.insert(availableHearthstones, hearthstone)
         end
     end
 
-    -- If no hearthstones are available, find the one with shortest cooldown
+    -- If no hearthstones are available, find the enabled one with shortest cooldown
     if #availableHearthstones == 0 then
-        DebugPrint("All hearthstones on cooldown, finding shortest cooldown")
+        DebugPrint("All enabled hearthstones on cooldown, finding shortest cooldown")
         local shortestCooldown = nil
         local shortestTime = math.huge
 
         for _, hearthstone in ipairs(hearthstoneToys) do
-            local remaining = GetRemainingCooldown(hearthstone)
-            if remaining < shortestTime then
-                shortestTime = remaining
-                shortestCooldown = hearthstone
+            if IsHearthstoneEnabled(hearthstone) then
+                local remaining = GetRemainingCooldown(hearthstone)
+                if remaining < shortestTime then
+                    shortestTime = remaining
+                    shortestCooldown = hearthstone
+                end
             end
         end
 
@@ -384,8 +423,171 @@ function ScanHearthstoneToys()
     DebugPrint("Found " .. #hearthstoneToys .. " usable hearthstones")
 end
 
+-- Create options panel with custom frame and proper icons
+local function CreateOptionsPanel()
+    local panel = CreateFrame("Frame", "HearthsOptionsPanel", UIParent)
+    panel.name = "Hearths"
+    
+    -- Title
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Hearths Options")
+    
+    -- Debug Mode checkbox
+    local debugCheckbox = CreateFrame("CheckButton", "HearthsDebugCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    debugCheckbox:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -20)
+    debugCheckbox.Text:SetText("Enable Debug Logging")
+    debugCheckbox:SetScript("OnClick", function(self)
+        HearthsDB.debug = self:GetChecked()
+        local status = self:GetChecked() and "enabled" or "disabled"
+        print("|cFF00FF00[Hearths]|r Debug logging " .. status)
+    end)
+    
+    -- Use All Hearthstones checkbox
+    local useAllCheckbox = CreateFrame("CheckButton", "HearthsUseAllCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
+    useAllCheckbox:SetPoint("TOPLEFT", debugCheckbox, "BOTTOMLEFT", 0, -10)
+    useAllCheckbox.Text:SetText("Use All Hearthstones")
+    useAllCheckbox:SetScript("OnClick", function(self)
+        HearthsDB.useAllHearthstones = self:GetChecked()
+        if HearthsDB.useAllHearthstones then
+            DebugPrint("Enabled all hearthstones for rotation")
+            -- Enable and check all individual checkboxes
+            for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
+                checkbox:SetChecked(true)
+                checkbox:SetEnabled(false)
+            end
+        else
+            DebugPrint("Switched to custom hearthstone selection")
+            -- Enable individual checkboxes and set them based on saved state
+            for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
+                checkbox:SetEnabled(true)
+                checkbox:SetChecked(HearthsDB.enabledHearthstones[checkbox.hearthstoneId] == true)
+            end
+        end
+        
+        -- If current hearthstone is no longer enabled, find a new one
+        if currentHearthstone and not IsHearthstoneEnabled(currentHearthstone) then
+            SetupRandomHearthstone()
+        end
+    end)
+    
+    -- Header for individual selections
+    local customHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    customHeader:SetPoint("TOPLEFT", useAllCheckbox, "BOTTOMLEFT", 0, -20)
+    customHeader:SetText("Individual Hearthstone Selection:")
+    
+    -- Container for individual hearthstone checkboxes
+    panel.hearthstoneCheckboxes = {}
+    
+    -- Create scrollable frame for hearthstone list
+    local scrollFrame = CreateFrame("ScrollFrame", "HearthsScrollFrame", panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", customHeader, "BOTTOMLEFT", 0, -10)
+    scrollFrame:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -30, 20)
+    scrollFrame:SetSize(400, 200)
+    
+    local scrollChild = CreateFrame("Frame", "HearthsScrollChild", scrollFrame)
+    scrollChild:SetSize(380, 1) -- Height will be set dynamically
+    scrollFrame:SetScrollChild(scrollChild)
+    
+    local function RefreshHearthstoneList()
+        -- Clear existing checkboxes
+        for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
+            checkbox:Hide()
+            checkbox:SetParent(nil)
+        end
+        panel.hearthstoneCheckboxes = {}
+        
+        -- If switching to custom mode for the first time, initialize all as enabled
+        if not HearthsDB.useAllHearthstones and not next(HearthsDB.enabledHearthstones) then
+            for _, hearthstone in ipairs(hearthstoneToys) do
+                HearthsDB.enabledHearthstones[hearthstone.id] = true
+            end
+        end
+        
+        -- Create checkboxes for each hearthstone in scroll child
+        local yOffset = -10
+        for i, hearthstone in ipairs(hearthstoneToys) do
+            -- Create a container frame for the checkbox + icon
+            local container = CreateFrame("Frame", "HearthsContainer" .. i, scrollChild)
+            container:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 20, yOffset)
+            container:SetSize(350, 25)
+            
+            -- Create icon
+            local icon = container:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(20, 20)
+            icon:SetPoint("LEFT", container, "LEFT", 0, 0)
+            icon:SetTexture(hearthstone.icon)
+            
+            -- Create checkbox
+            local checkbox = CreateFrame("CheckButton", "HearthsCheckbox" .. i, container, "InterfaceOptionsCheckButtonTemplate")
+            checkbox:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+            checkbox.Text:SetText(hearthstone.name)
+            checkbox.hearthstoneId = hearthstone.id
+            
+            checkbox:SetScript("OnClick", function(self)
+                if not HearthsDB.useAllHearthstones then
+                    HearthsDB.enabledHearthstones[hearthstone.id] = self:GetChecked()
+                    local status = self:GetChecked() and "enabled" or "disabled"
+                    DebugPrint(hearthstone.name .. " " .. status)
+                    
+                    -- Check if all are now enabled
+                    local allEnabled = true
+                    for _, h in ipairs(hearthstoneToys) do
+                        if not HearthsDB.enabledHearthstones[h.id] then
+                            allEnabled = false
+                            break
+                        end
+                    end
+                    if allEnabled then
+                        HearthsDB.useAllHearthstones = true
+                        useAllCheckbox:SetChecked(true)
+                        for _, cb in pairs(panel.hearthstoneCheckboxes) do
+                            cb:SetChecked(true)
+                            cb:SetEnabled(false)
+                        end
+                        DebugPrint("All hearthstones enabled, switched back to 'Use All' mode")
+                    end
+                    
+                    -- If current hearthstone was disabled, find a new one
+                    if currentHearthstone and not self:GetChecked() and hearthstone.id == currentHearthstone.id then
+                        SetupRandomHearthstone()
+                    end
+                end
+            end)
+            
+            panel.hearthstoneCheckboxes[i] = checkbox
+            yOffset = yOffset - 30
+        end
+        
+        -- Set scroll child height based on content
+        scrollChild:SetHeight(math.max(200, #hearthstoneToys * 30 + 20))
+        
+        -- Set initial states
+        debugCheckbox:SetChecked(HearthsDB.debug)
+        useAllCheckbox:SetChecked(HearthsDB.useAllHearthstones)
+        for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
+            if HearthsDB.useAllHearthstones then
+                checkbox:SetChecked(true)
+                checkbox:SetEnabled(false)
+            else
+                checkbox:SetChecked(HearthsDB.enabledHearthstones[checkbox.hearthstoneId] == true)
+                checkbox:SetEnabled(true)
+            end
+        end
+    end
+    
+    panel.RefreshHearthstoneList = RefreshHearthstoneList
+    
+    local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+    Settings.RegisterAddOnCategory(category)
+    panel.category = category
+    
+    return panel
+end
+
 -- Initialize the addon
 local eventFrame = CreateFrame("Frame")
+local optionsPanel = nil
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("LOADING_SCREEN_DISABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
@@ -395,6 +597,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         InitializeSavedVars()
         C_Timer.After(1, function()
             CreateHearthstoneButton()
+            optionsPanel = CreateOptionsPanel()
+            -- Refresh the hearthstone list after scanning
+            if optionsPanel.RefreshHearthstoneList then
+                optionsPanel.RefreshHearthstoneList()
+            end
         end)
     elseif (event == "LOADING_SCREEN_DISABLED" or event == "UNIT_SPELLCAST_STOP") and pendingRotation then
         -- Loading screen ended, delay rotation to ensure cooldowns are updated
@@ -439,10 +646,16 @@ SlashCmdList["HEARTHS"] = function(msg)
             HearthsDB.position = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }
             print("|cFF00FF00[Hearths]|r Button position reset to center")
         end
+    elseif command == "options" or command == "config" then
+        if not optionsPanel then
+            optionsPanel = CreateOptionsPanel()
+        end
+        Settings.OpenToCategory(optionsPanel.category:GetID())
     else
         print("|cFF00FF00[Hearths]|r Commands:")
         print("  /hearths debug on|off - Toggle debug logging")
         print("  /hearths reset - Reset button position to center")
+        print("  /hearths options - Open options panel")
         print("  Hold Alt and drag to move the button")
     end
 end

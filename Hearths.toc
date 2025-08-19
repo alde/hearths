@@ -1,8 +1,8 @@
 ## Interface: 110200
 ## Title: Hearths
-## Version: 0.2
+## Version: 0.3
 ## Notes: Hearthstone Rotation
-## Author: Your Name
-## SavedVariables: HearthsDB
+## Author: Rickard Dybeck
+## SavedVariablesPerCharacter: HearthsDB
 
 Hearths.lua

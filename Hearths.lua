@@ -481,6 +481,27 @@ local function CreateOptionsPanel()
     scrollFrame:SetScrollChild(scrollChild)
 
     local function RefreshHearthstoneList()
+        -- Always scan for hearthstones to ensure the list is up to date
+        ScanHearthstoneToys()
+        DebugPrint("RefreshHearthstoneList: Found " .. #hearthstoneToys .. " hearthstones after scan")
+
+        -- Debug: list all hearthstones found
+        for i, hearthstone in ipairs(hearthstoneToys) do
+            DebugPrint("  " .. i .. ": " .. hearthstone.name .. " (ID: " .. hearthstone.id .. ")")
+        end
+
+        -- Safeguard: If no hearthstones found, ensure at least the default one exists
+        if #hearthstoneToys == 0 then
+            DebugPrint("No hearthstones found in scan, adding default hearthstone")
+            local defaultHearthstone = {
+                id = 6948,
+                name = "Hearthstone",
+                icon = "Interface\\Icons\\INV_Misc_Rune_01",
+                type = "item"
+            }
+            table.insert(hearthstoneToys, defaultHearthstone)
+        end
+
         -- Clear existing checkboxes
         for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
             checkbox:Hide()
@@ -539,9 +560,17 @@ local function CreateOptionsPanel()
                         DebugPrint("All hearthstones enabled, switched back to 'Use All' mode")
                     end
 
-                    -- If current hearthstone was disabled, find a new one
-                    if currentHearthstone and not self:GetChecked() and hearthstone.id == currentHearthstone.id then
-                        SetupRandomHearthstone()
+                    -- Handle hearthstone enable/disable changes
+                    if self:GetChecked() then
+                        -- Hearthstone was enabled - if no current hearthstone or button is hidden, set up a new one
+                        if not currentHearthstone or (frame and not frame:IsShown()) then
+                            SetupRandomHearthstone()
+                        end
+                    else
+                        -- Hearthstone was disabled - if it was the current one, find a new one
+                        if currentHearthstone and hearthstone.id == currentHearthstone.id then
+                            SetupRandomHearthstone()
+                        end
                     end
                 end
             end)
@@ -646,6 +675,10 @@ function SetupRandomHearthstone()
         if shortestCooldown then
             currentHearthstone = shortestCooldown
             DebugPrint("Selected hearthstone with shortest cooldown: " .. currentHearthstone.name .. " (" .. math.floor(shortestTime) .. "s remaining)")
+        else
+            -- No enabled hearthstones found at all
+            currentHearthstone = nil
+            DebugPrint("No enabled hearthstones found, hiding button")
         end
     else
         -- Pick a random hearthstone from available ones
@@ -654,10 +687,19 @@ function SetupRandomHearthstone()
         DebugPrint("Selected available hearthstone: " .. currentHearthstone.name)
     end
 
-    -- Update the button for the new hearthstone
-    UpdateButtonForHearthstone(currentHearthstone)
+    -- Update the button for the new hearthstone or hide it if none selected
+    if currentHearthstone then
+        UpdateButtonForHearthstone(currentHearthstone)
+        frame:Show()
+    else
+        -- Hide the button when no hearthstones are enabled
+        frame:Hide()
+        DebugPrint("Button hidden - no enabled hearthstones")
+    end
 
-    DebugPrint("Switched to: " .. currentHearthstone.name .. " (ID: " .. currentHearthstone.id .. ")")
+    if currentHearthstone then
+        DebugPrint("Switched to: " .. currentHearthstone.name .. " (ID: " .. currentHearthstone.id .. ")")
+    end
 end
 
 -- Initialize the addon
@@ -718,6 +760,10 @@ SlashCmdList["HEARTHS"] = function(msg)
     elseif command == "options" or command == "config" then
         if not optionsPanel then
             optionsPanel = CreateOptionsPanel()
+        end
+        -- Always refresh the hearthstone list when opening options
+        if optionsPanel.RefreshHearthstoneList then
+            optionsPanel.RefreshHearthstoneList()
         end
         Settings.OpenToCategory(optionsPanel.category:GetID())
     else

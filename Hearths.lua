@@ -263,7 +263,7 @@ local function CreateHearthstoneButton()
         end
     end)
 
-    -- Update cooldown display and check for available hearthstones (throttled to 1 second intervals)
+    -- Update cooldown display (throttled to 1 second intervals)
     frame:SetScript("OnUpdate", function(self, elapsed)
         lastCooldownCheck = lastCooldownCheck + elapsed
         if lastCooldownCheck >= 1.0 and currentHearthstone then
@@ -271,28 +271,6 @@ local function CreateHearthstoneButton()
             local startTime, duration = GetCooldownInfo(currentHearthstone)
             if duration > 0 then
                 cooldownFrame:SetCooldown(startTime, duration)
-                -- Current hearthstone is on cooldown, check if any others are available
-                -- But only if we're not currently casting something
-                if not UnitCastingInfo("player") and not UnitChannelInfo("player") then
-                    local availableHearthstones = {}
-                    for _, hearthstone in ipairs(hearthstoneToys) do
-                        if IsHearthstoneEnabled(hearthstone) and not IsOnCooldown(hearthstone) then
-                            table.insert(availableHearthstones, hearthstone)
-                        end
-                    end
-
-                    -- If we found available hearthstones, switch to one
-                    if #availableHearthstones > 0 then
-                        local randomIndex = math.random(1, #availableHearthstones)
-                        local newHearthstone = availableHearthstones[randomIndex]
-                        if newHearthstone.id ~= currentHearthstone.id then
-                            currentHearthstone = newHearthstone
-                            UpdateButtonForHearthstone(currentHearthstone)
-                            cooldownFrame:Clear()
-                            DebugPrint("Switched to available hearthstone: " .. currentHearthstone.name)
-                        end
-                    end
-                end
             else
                 cooldownFrame:Clear()
             end
@@ -643,48 +621,47 @@ function SetupRandomHearthstone()
         return
     end
 
-    -- Filter out hearthstones that are on cooldown or disabled
     local availableHearthstones = {}
+    local shortestCooldownHearthstones = {}
+    local shortestTime = math.huge
+
     DebugPrint("Checking cooldowns for all hearthstones:")
     for _, hearthstone in ipairs(hearthstoneToys) do
         local onCooldown = IsOnCooldown(hearthstone)
         local enabled = IsHearthstoneEnabled(hearthstone)
         local remaining = GetRemainingCooldown(hearthstone)
         DebugPrint("  " .. hearthstone.name .. ": " .. (onCooldown and ("on cooldown (" .. math.floor(remaining) .. "s)") or "available") .. (enabled and "" or " (disabled)"))
-        if not onCooldown and enabled then
-            table.insert(availableHearthstones, hearthstone)
-        end
-    end
 
-    -- If no hearthstones are available, find the enabled one with shortest cooldown
-    if #availableHearthstones == 0 then
-        DebugPrint("All enabled hearthstones on cooldown, finding shortest cooldown")
-        local shortestCooldown = nil
-        local shortestTime = math.huge
-
-        for _, hearthstone in ipairs(hearthstoneToys) do
-            if IsHearthstoneEnabled(hearthstone) then
-                local remaining = GetRemainingCooldown(hearthstone)
+        if enabled then
+            -- 1. Check if any are off cooldown
+            if not onCooldown then
+                table.insert(availableHearthstones, hearthstone)
+            else
+                -- 2. Track shortest cooldown times
                 if remaining < shortestTime then
                     shortestTime = remaining
-                    shortestCooldown = hearthstone
+                    shortestCooldownHearthstones = {hearthstone}
+                elseif remaining == shortestTime then
+                    table.insert(shortestCooldownHearthstones, hearthstone)
                 end
             end
         end
+    end
 
-        if shortestCooldown then
-            currentHearthstone = shortestCooldown
-            DebugPrint("Selected hearthstone with shortest cooldown: " .. currentHearthstone.name .. " (" .. math.floor(shortestTime) .. "s remaining)")
-        else
-            -- No enabled hearthstones found at all
-            currentHearthstone = nil
-            DebugPrint("No enabled hearthstones found, hiding button")
-        end
-    else
-        -- Pick a random hearthstone from available ones
+    -- 1. If any are off cooldown, pick one randomly
+    if #availableHearthstones > 0 then
         local randomIndex = math.random(1, #availableHearthstones)
         currentHearthstone = availableHearthstones[randomIndex]
         DebugPrint("Selected available hearthstone: " .. currentHearthstone.name)
+    -- 2. If not, pick randomly from those with shortest cooldown
+    elseif #shortestCooldownHearthstones > 0 then
+        local randomIndex = math.random(1, #shortestCooldownHearthstones)
+        currentHearthstone = shortestCooldownHearthstones[randomIndex]
+        DebugPrint("Selected hearthstone with shortest cooldown: " .. currentHearthstone.name .. " (" .. math.floor(shortestTime) .. "s remaining)")
+    else
+        -- No enabled hearthstones found at all
+        currentHearthstone = nil
+        DebugPrint("No enabled hearthstones found, hiding button")
     end
 
     -- Update the button for the new hearthstone or hide it if none selected
@@ -709,6 +686,7 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("LOADING_SCREEN_DISABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         DebugPrint("Addon loaded, initializing SavedVariables")
@@ -716,17 +694,26 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         C_Timer.After(1, AttemptInitialization)
     elseif (event == "LOADING_SCREEN_DISABLED" or event == "UNIT_SPELLCAST_STOP") and pendingRotation then
         -- Loading screen ended, delay rotation to ensure cooldowns are updated
+        -- But only if not in combat
         C_Timer.After(2.0, function()
-            if pendingRotation then
+            if pendingRotation and not UnitAffectingCombat("player") then
                 SetupRandomHearthstone()
                 pendingRotation = false
                 DebugPrint("Loading screen ended, rotated hearthstone")
+            elseif pendingRotation and UnitAffectingCombat("player") then
+                DebugPrint("Skipping rotation - player in combat")
+                -- Keep pendingRotation true so it will rotate when combat ends
             end
         end)
     elseif event == "UNIT_SPELLCAST_INTERRUPTED" and arg1 == "player" and pendingRotation then
         -- Hearthstone cast was interrupted
         pendingRotation = false
         DebugPrint("Hearthstone interrupted, not rotating")
+    elseif event == "PLAYER_REGEN_ENABLED" and pendingRotation then
+        -- Combat ended and we have a pending rotation
+        SetupRandomHearthstone()
+        pendingRotation = false
+        DebugPrint("Combat ended, rotated hearthstone")
     end
 end)
 

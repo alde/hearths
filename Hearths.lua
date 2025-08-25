@@ -6,6 +6,8 @@ local currentHearthstone = nil
 local hearthstoneToys = {}
 local pendingRotation = false
 local lastCooldownCheck = 0
+local buttonVisible = true
+local mouseoverVisible = false
 
 -- Debug print function
 local function DebugPrint(msg)
@@ -24,6 +26,7 @@ local function InitializeSavedVars()
         HearthsDB.useAllHearthstones = true
     end
     HearthsDB.enabledHearthstones = HearthsDB.enabledHearthstones or {}
+    HearthsDB.visibilityMode = HearthsDB.visibilityMode or "always"
 
     if wasNew then
         DebugPrint("SavedVariables initialized for first time - useAllHearthstones: " .. tostring(HearthsDB.useAllHearthstones))
@@ -31,6 +34,56 @@ local function InitializeSavedVars()
         DebugPrint("SavedVariables loaded - useAllHearthstones: " .. tostring(HearthsDB.useAllHearthstones) .. ", enabledHearthstones count: " .. tostring(#HearthsDB.enabledHearthstones))
     end
 end
+
+
+-- Function to update button visibility based on current mode
+local function UpdateButtonVisibility()
+    if not frame then
+        return
+    end
+
+    local mode = HearthsDB.visibilityMode
+    local shouldShow = false
+
+    if mode == "always" then
+        shouldShow = true
+    elseif mode == "never" then
+        shouldShow = false
+    elseif mode == "mouseover" then
+        shouldShow = mouseoverVisible
+    else
+        -- Default to always visible for unknown modes
+        shouldShow = true
+    end
+
+    -- Only show if we have a current hearthstone
+    if shouldShow and not currentHearthstone then
+        shouldShow = false
+    end
+
+    -- Always keep frame shown for mouse events
+    frame:Show()
+    frame:SetAlpha(0)
+
+    -- Handle always visible mode
+    if mode == "always" then
+        frame:Show()
+        frame:SetAlpha(1)
+        return
+    end
+
+    if mode == "mouseover" then
+        frame:Show()
+        -- TODO: fade in and out
+        frame:SetAlpha(mouseoverVisible and 1 or 0)
+    end
+
+    if mode == "never" then
+        frame:Hide()
+        return
+    end
+end
+
 
 -- Function to check if a hearthstone is enabled for rotation
 local function IsHearthstoneEnabled(hearthstone)
@@ -45,9 +98,9 @@ local function GetCooldownInfo(hearthstone)
     local startTime, duration = 0, 0
 
     if hearthstone.type == "toy" then
-        startTime, duration = GetItemCooldown(hearthstone.id)
+        startTime, duration = C_Item.GetItemCooldown(hearthstone.id)
     elseif hearthstone.type == "item" then
-        startTime, duration = GetItemCooldown(hearthstone.id)
+        startTime, duration = C_Item.GetItemCooldown(hearthstone.id)
     elseif hearthstone.type == "spell" then
         local cooldownInfo = C_Spell.GetSpellCooldown(hearthstone.id)
         if cooldownInfo then
@@ -181,7 +234,7 @@ local function CreateHearthstoneButton()
         DebugPrint("Selected available hearthstone at startup: " .. currentHearthstone.name)
     end
 
-    frame = CreateFrame("Button", "HearthsButton", UIParent, "SecureActionButtonTemplate")
+    frame = CreateFrame("Button", "Hearths", UIParent, "SecureActionButtonTemplate")
     frame:SetSize(41, 41)
     frame:SetPoint("CENTER", UIParent, "CENTER")
     frame:SetMovable(true)
@@ -266,6 +319,7 @@ local function CreateHearthstoneButton()
     -- Update cooldown display (throttled to 1 second intervals)
     frame:SetScript("OnUpdate", function(self, elapsed)
         lastCooldownCheck = lastCooldownCheck + elapsed
+
         if lastCooldownCheck >= 1.0 and currentHearthstone then
             lastCooldownCheck = 0
             local startTime, duration = GetCooldownInfo(currentHearthstone)
@@ -284,7 +338,60 @@ local function CreateHearthstoneButton()
     end
 
     DebugPrint("Created button for: " .. currentHearthstone.name .. " (ID: " .. currentHearthstone.id .. ")")
+
+    -- Apply visibility settings
+    UpdateButtonVisibility()
+
+    -- Mouseover detection using direct button events
+    local mouseoverTimer = nil
+
+    -- Store original handlers
+    local originalOnEnter = frame:GetScript("OnEnter")
+    local originalOnLeave = frame:GetScript("OnLeave")
+
+    frame:SetScript("OnEnter", function(self)
+        if HearthsDB.visibilityMode == "mouseover" then
+            -- Cancel any pending hide timer
+            if mouseoverTimer then
+                mouseoverTimer:Cancel()
+                mouseoverTimer = nil
+            end
+
+            DebugPrint("Mouse entered button area")
+            mouseoverVisible = true
+            UpdateButtonVisibility()
+        end
+
+        -- Call original OnEnter for tooltip
+        if originalOnEnter then
+            originalOnEnter(self)
+        end
+    end)
+
+    frame:SetScript("OnLeave", function(self)
+        if HearthsDB.visibilityMode == "mouseover" then
+            -- Add delay before hiding to prevent flickering
+            if mouseoverTimer then
+                mouseoverTimer:Cancel()
+            end
+            mouseoverTimer = C_Timer.NewTimer(0.3, function()
+                if HearthsDB.visibilityMode == "mouseover" then
+                    DebugPrint("Mouse left button area (delayed)")
+                    mouseoverVisible = false
+                    UpdateButtonVisibility()
+                end
+                mouseoverTimer = nil
+            end)
+        end
+
+        -- Call original OnLeave for tooltip
+        if originalOnLeave then
+            originalOnLeave(self)
+        end
+    end)
+
 end
+
 
 -- Create a hidden tooltip for scanning item descriptions
 local scanningTooltip = CreateFrame("GameTooltip", "HearthsScanningTooltip", UIParent, "GameTooltipTemplate")
@@ -327,10 +434,6 @@ function ScanHearthstoneToys()
     }
     table.insert(hearthstoneToys, defaultHearthstone)
     DebugPrint("Added to rotation: " .. defaultHearthstone.name)
-
-    -- Dalaran Hearthstone is available via Shift-click but not in regular rotation
-
-    -- Garrison Hearthstone is available via Ctrl-click but not in regular rotation
 
     -- Add Astral Recall if player is a Shaman
     local _, playerClass = UnitClass("player")
@@ -412,9 +515,81 @@ local function CreateOptionsPanel()
         print("|cFF00FF00[Hearths]|r Debug logging " .. status)
     end)
 
-    -- Use All Hearthstones checkbox
+    -- Visibility Mode Section
+    local visibilityHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    visibilityHeader:SetPoint("TOPLEFT", debugCheckbox, "BOTTOMLEFT", 0, -20)
+    visibilityHeader:SetText("Button Visibility:")
+
+    -- Visibility Mode Dropdown
+    local visibilityDropdown = CreateFrame("Frame", "HearthsVisibilityDropdown", panel, "UIDropDownMenuTemplate")
+    visibilityDropdown:SetPoint("TOPLEFT", visibilityHeader, "BOTTOMLEFT", -15, -5)
+    UIDropDownMenu_SetWidth(visibilityDropdown, 150)
+    UIDropDownMenu_SetText(visibilityDropdown, "Always Visible")
+
+    local function VisibilityDropdown_OnClick(self)
+        HearthsDB.visibilityMode = self.value
+        UIDropDownMenu_SetText(visibilityDropdown, self:GetText())
+        DebugPrint("Visibility mode changed to: " .. self.value)
+        UpdateButtonVisibility()
+        CloseDropDownMenus()
+    end
+
+    local function VisibilityDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+
+        info.text = "Always Visible"
+        info.value = "always"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "always"
+        UIDropDownMenu_AddButton(info)
+
+        info.text = "Never Visible"
+        info.value = "never"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "never"
+        UIDropDownMenu_AddButton(info)
+
+
+        info.text = "Show on Mouseover"
+        info.value = "mouseover"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "mouseover"
+        UIDropDownMenu_AddButton(info)
+    end
+
+    UIDropDownMenu_Initialize(visibilityDropdown, VisibilityDropdown_Initialize)
+
+    -- Keybinding Information Section
+    local keybindHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    keybindHeader:SetPoint("TOPLEFT", visibilityDropdown, "BOTTOMLEFT", 15, -20)
+    keybindHeader:SetText("Keybindings:")
+
+    -- Create keybind text frame (will be updated dynamically)
+    local keybindCurrent = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    keybindCurrent:SetPoint("TOPLEFT", keybindHeader, "BOTTOMLEFT", 0, -3)
+    keybindCurrent:SetText("• Current binding: Loading...")
+    keybindCurrent:SetTextColor(0.8, 0.8, 0.8)
+
+    -- Store reference for dynamic updates
+    panel.keybindCurrent = keybindCurrent
+
+    -- Update keybinding text whenever the panel is shown
+    panel:SetScript("OnShow", function()
+        if panel.keybindCurrent then
+            local currentKeybind = GetBindingKey("CLICK Hearths:LeftButton")
+            if currentKeybind then
+                panel.keybindCurrent:SetText("• Current binding: Random " .. currentKeybind .. ", Dalaran: Shift+" .. currentKeybind .. ", Garrison: Ctrl+" .. currentKeybind)
+                panel.keybindCurrent:SetTextColor(0.5, 1, 0.5)
+            else
+                panel.keybindCurrent:SetText("• Current binding: None - Configure in Interface > Key Bindings > Hearths")
+                panel.keybindCurrent:SetTextColor(0.8, 0.8, 0.8)
+            end
+        end
+    end)
+
+       -- Use All Hearthstones checkbox
     local useAllCheckbox = CreateFrame("CheckButton", "HearthsUseAllCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
-    useAllCheckbox:SetPoint("TOPLEFT", debugCheckbox, "BOTTOMLEFT", 0, -10)
+    useAllCheckbox:SetPoint("TOPLEFT", keybindCurrent, "BOTTOMLEFT", 0, -10)
     useAllCheckbox.Text:SetText("Use All Hearthstones")
     useAllCheckbox:SetScript("OnClick", function(self)
         HearthsDB.useAllHearthstones = self:GetChecked()
@@ -442,7 +617,7 @@ local function CreateOptionsPanel()
 
     -- Header for individual selections
     local customHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    customHeader:SetPoint("TOPLEFT", useAllCheckbox, "BOTTOMLEFT", 0, -20)
+    customHeader:SetPoint("TOPLEFT", useAllCheckbox, "BOTTOMLEFT", 0, -15)
     customHeader:SetText("Individual Hearthstone Selection:")
 
     -- Container for individual hearthstone checkboxes
@@ -563,6 +738,15 @@ local function CreateOptionsPanel()
         -- Set initial states
         debugCheckbox:SetChecked(HearthsDB.debug)
         useAllCheckbox:SetChecked(HearthsDB.useAllHearthstones)
+
+        -- Set visibility dropdown text
+        local visibilityTexts = {
+            always = "Always Visible",
+            never = "Never Visible",
+            mouseover = "Show on Mouseover"
+        }
+        UIDropDownMenu_SetText(visibilityDropdown, visibilityTexts[HearthsDB.visibilityMode] or "Always Visible")
+
         for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
             if HearthsDB.useAllHearthstones then
                 checkbox:SetChecked(true)
@@ -667,7 +851,7 @@ function SetupRandomHearthstone()
     -- Update the button for the new hearthstone or hide it if none selected
     if currentHearthstone then
         UpdateButtonForHearthstone(currentHearthstone)
-        frame:Show()
+        UpdateButtonVisibility()
     else
         -- Hide the button when no hearthstones are enabled
         frame:Hide()
@@ -686,7 +870,7 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("LOADING_SCREEN_DISABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
-eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Leaving combat
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         DebugPrint("Addon loaded, initializing SavedVariables")
@@ -709,55 +893,25 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- Hearthstone cast was interrupted
         pendingRotation = false
         DebugPrint("Hearthstone interrupted, not rotating")
-    elseif event == "PLAYER_REGEN_ENABLED" and pendingRotation then
-        -- Combat ended and we have a pending rotation
-        SetupRandomHearthstone()
-        pendingRotation = false
-        DebugPrint("Combat ended, rotated hearthstone")
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Leaving combat - handle pending rotation when combat ends
+        if pendingRotation then
+            SetupRandomHearthstone()
+            pendingRotation = false
+            DebugPrint("Combat ended, rotated hearthstone")
+        end
     end
 end)
 
--- Slash command for debug control
+-- Slash command to open settings
 SLASH_HEARTHS1 = "/hearths"
-SLASH_HEARTHS2 = "/hearth"
 SlashCmdList["HEARTHS"] = function(msg)
-    local args = {strsplit(" ", msg)}
-    local command = args[1] or ""
-
-    if command == "debug" then
-        local setting = args[2] or ""
-        if setting == "on" then
-            HearthsDB.debug = true
-            print("|cFF00FF00[Hearths]|r Debug logging enabled")
-        elseif setting == "off" then
-            HearthsDB.debug = false
-            print("|cFF00FF00[Hearths]|r Debug logging disabled")
-        else
-            local status = HearthsDB.debug and "enabled" or "disabled"
-            print("|cFF00FF00[Hearths]|r Debug logging is currently " .. status)
-            print("  Usage: /hearths debug on|off")
-        end
-    elseif command == "reset" then
-        if frame then
-            frame:ClearAllPoints()
-            frame:SetPoint("CENTER", UIParent, "CENTER")
-            HearthsDB.position = { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }
-            print("|cFF00FF00[Hearths]|r Button position reset to center")
-        end
-    elseif command == "options" or command == "config" then
-        if not optionsPanel then
-            optionsPanel = CreateOptionsPanel()
-        end
-        -- Always refresh the hearthstone list when opening options
-        if optionsPanel.RefreshHearthstoneList then
-            optionsPanel.RefreshHearthstoneList()
-        end
-        Settings.OpenToCategory(optionsPanel.category:GetID())
-    else
-        print("|cFF00FF00[Hearths]|r Commands:")
-        print("  /hearths debug on|off - Toggle debug logging")
-        print("  /hearths reset - Reset button position to center")
-        print("  /hearths options - Open options panel")
-        print("  Hold Alt and drag to move the button")
+    if not optionsPanel then
+        optionsPanel = CreateOptionsPanel()
     end
+    -- Always refresh the hearthstone list when opening options
+    if optionsPanel.RefreshHearthstoneList then
+        optionsPanel.RefreshHearthstoneList()
+    end
+    Settings.OpenToCategory(optionsPanel.category:GetID())
 end

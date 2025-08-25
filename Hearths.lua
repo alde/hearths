@@ -6,6 +6,10 @@ local currentHearthstone = nil
 local hearthstoneToys = {}
 local pendingRotation = false
 local lastCooldownCheck = 0
+local buttonVisible = true
+local inCombat = false
+local toggledVisible = true
+local holdKeyPressed = false
 
 -- Debug print function
 local function DebugPrint(msg)
@@ -24,12 +28,130 @@ local function InitializeSavedVars()
         HearthsDB.useAllHearthstones = true
     end
     HearthsDB.enabledHearthstones = HearthsDB.enabledHearthstones or {}
+    HearthsDB.visibilityMode = HearthsDB.visibilityMode or "always"
+    HearthsDB.holdKey = HearthsDB.holdKey or "ALT"
+    HearthsDB.toggleKey = HearthsDB.toggleKey or "CTRL-H"
 
     if wasNew then
         DebugPrint("SavedVariables initialized for first time - useAllHearthstones: " .. tostring(HearthsDB.useAllHearthstones))
     else
         DebugPrint("SavedVariables loaded - useAllHearthstones: " .. tostring(HearthsDB.useAllHearthstones) .. ", enabledHearthstones count: " .. tostring(#HearthsDB.enabledHearthstones))
     end
+end
+
+-- Function to update button visibility based on current mode
+local function UpdateButtonVisibility()
+    if not frame then
+        return
+    end
+
+    local mode = HearthsDB.visibilityMode
+    local shouldShow = false
+
+    if mode == "always" then
+        shouldShow = true
+    elseif mode == "never" then
+        shouldShow = false
+    elseif mode == "combat" then
+        shouldShow = inCombat
+    elseif mode == "out_of_combat" then
+        shouldShow = not inCombat
+    elseif mode == "hold" then
+        shouldShow = holdKeyPressed
+    elseif mode == "toggle" then
+        shouldShow = toggledVisible
+    else
+        -- Default to always visible for unknown modes
+        shouldShow = true
+    end
+
+    -- Only show if we have enabled hearthstones
+    if shouldShow and currentHearthstone and not IsHearthstoneEnabled(currentHearthstone) then
+        -- Check if any hearthstones are enabled
+        local hasEnabledHearthstone = false
+        for _, hearthstone in ipairs(hearthstoneToys) do
+            if IsHearthstoneEnabled(hearthstone) then
+                hasEnabledHearthstone = true
+                break
+            end
+        end
+        if not hasEnabledHearthstone then
+            shouldShow = false
+        end
+    end
+
+    if shouldShow ~= buttonVisible then
+        buttonVisible = shouldShow
+        if shouldShow then
+            frame:SetAlpha(0)
+            frame:Show()
+            -- Fade in animation
+            local fadeIn = frame:CreateAnimationGroup()
+            local alpha = fadeIn:CreateAnimation("Alpha")
+            alpha:SetFromAlpha(0)
+            alpha:SetToAlpha(1)
+            alpha:SetDuration(0.3)
+            fadeIn:Play()
+        else
+            -- Fade out animation
+            local fadeOut = frame:CreateAnimationGroup()
+            local alpha = fadeOut:CreateAnimation("Alpha")
+            alpha:SetFromAlpha(frame:GetAlpha())
+            alpha:SetToAlpha(0)
+            alpha:SetDuration(0.3)
+            fadeOut:SetScript("OnFinished", function()
+                frame:Hide()
+            end)
+            fadeOut:Play()
+        end
+
+        DebugPrint("Button visibility changed: " .. (shouldShow and "shown" or "hidden") .. " (mode: " .. mode .. ")")
+    end
+end
+
+-- Function to check if the hold key is currently pressed
+local function IsHoldKeyPressed()
+    local holdKey = HearthsDB.holdKey or "ALT"
+    if holdKey == "ALT" then
+        return IsAltKeyDown()
+    elseif holdKey == "CTRL" then
+        return IsControlKeyDown()
+    elseif holdKey == "SHIFT" then
+        return IsShiftKeyDown()
+    end
+    return false
+end
+
+-- Function to parse and check toggle key combination
+local function CheckToggleKey()
+    local toggleKey = HearthsDB.toggleKey or "CTRL-H"
+    local parts = {strsplit("-", toggleKey)}
+
+    if #parts == 2 then
+        local modifier = parts[1]
+        local key = parts[2]
+
+        -- Check if the modifier is pressed
+        local modifierPressed = false
+        if modifier == "CTRL" then
+            modifierPressed = IsControlKeyDown()
+        elseif modifier == "ALT" then
+            modifierPressed = IsAltKeyDown()
+        elseif modifier == "SHIFT" then
+            modifierPressed = IsShiftKeyDown()
+        end
+
+        return modifierPressed, key
+    end
+
+    return false, nil
+end
+
+-- Function to toggle button visibility
+local function ToggleButtonVisibility()
+    toggledVisible = not toggledVisible
+    DebugPrint("Button toggled " .. (toggledVisible and "visible" or "hidden"))
+    UpdateButtonVisibility()
 end
 
 -- Function to check if a hearthstone is enabled for rotation
@@ -263,9 +385,21 @@ local function CreateHearthstoneButton()
         end
     end)
 
-    -- Update cooldown display (throttled to 1 second intervals)
+    -- Update cooldown display and check for available hearthstones (throttled to 1 second intervals)
+    -- Also handle hold key detection for visibility
     frame:SetScript("OnUpdate", function(self, elapsed)
         lastCooldownCheck = lastCooldownCheck + elapsed
+
+        -- Check hold key state for hold mode
+        if HearthsDB.visibilityMode == "hold" then
+            local currentHoldState = IsHoldKeyPressed()
+            if currentHoldState ~= holdKeyPressed then
+                holdKeyPressed = currentHoldState
+                DebugPrint("Hold key " .. (HearthsDB.holdKey or "ALT") .. " " .. (holdKeyPressed and "pressed" or "released"))
+                UpdateButtonVisibility()
+            end
+        end
+
         if lastCooldownCheck >= 1.0 and currentHearthstone then
             lastCooldownCheck = 0
             local startTime, duration = GetCooldownInfo(currentHearthstone)
@@ -284,6 +418,23 @@ local function CreateHearthstoneButton()
     end
 
     DebugPrint("Created button for: " .. currentHearthstone.name .. " (ID: " .. currentHearthstone.id .. ")")
+
+    -- Apply visibility settings
+    UpdateButtonVisibility()
+
+    -- Create key frame for toggle key detection
+    local keyFrame = CreateFrame("Frame", "HearthsKeyFrame", UIParent)
+    keyFrame:SetScript("OnKeyDown", function(self, key)
+        if HearthsDB.visibilityMode == "toggle" then
+            local modifierPressed, toggleKey = CheckToggleKey()
+            if modifierPressed and key == toggleKey then
+                DebugPrint("Toggle key combination " .. (HearthsDB.toggleKey or "CTRL-H") .. " detected")
+                ToggleButtonVisibility()
+            end
+        end
+    end)
+    keyFrame:SetPropagateKeyboardInput(true)
+    keyFrame:EnableKeyboard(true)
 end
 
 -- Create a hidden tooltip for scanning item descriptions
@@ -440,9 +591,134 @@ local function CreateOptionsPanel()
         end
     end)
 
+    -- Visibility Mode Section
+    local visibilityHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    visibilityHeader:SetPoint("TOPLEFT", useAllCheckbox, "BOTTOMLEFT", 0, -20)
+    visibilityHeader:SetText("Button Visibility:")
+
+    -- Visibility Mode Dropdown
+    local visibilityDropdown = CreateFrame("DropDownMenu", "HearthsVisibilityDropdown", panel, "UIDropDownMenuTemplate")
+    visibilityDropdown:SetPoint("TOPLEFT", visibilityHeader, "BOTTOMLEFT", -15, -5)
+    UIDropDownMenu_SetWidth(visibilityDropdown, 150)
+    UIDropDownMenu_SetText(visibilityDropdown, "Always Visible")
+
+    local function VisibilityDropdown_OnClick(self)
+        HearthsDB.visibilityMode = self.value
+        UIDropDownMenu_SetText(visibilityDropdown, self:GetText())
+        DebugPrint("Visibility mode changed to: " .. self.value)
+        UpdateButtonVisibility()
+        CloseDropDownMenus()
+    end
+
+    local function VisibilityDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+
+        info.text = "Always Visible"
+        info.value = "always"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "always"
+        UIDropDownMenu_AddButton(info)
+
+        info.text = "Never Visible"
+        info.value = "never"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "never"
+        UIDropDownMenu_AddButton(info)
+
+        info.text = "In Combat Only"
+        info.value = "combat"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "combat"
+        UIDropDownMenu_AddButton(info)
+
+        info.text = "Out of Combat Only"
+        info.value = "out_of_combat"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "out_of_combat"
+        UIDropDownMenu_AddButton(info)
+
+        info.text = "Hold Key to Show"
+        info.value = "hold"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "hold"
+        UIDropDownMenu_AddButton(info)
+
+        info.text = "Toggle with Key"
+        info.value = "toggle"
+        info.func = VisibilityDropdown_OnClick
+        info.checked = HearthsDB.visibilityMode == "toggle"
+        UIDropDownMenu_AddButton(info)
+    end
+
+    UIDropDownMenu_Initialize(visibilityDropdown, VisibilityDropdown_Initialize)
+
+    -- Hold Key Dropdown
+    local holdKeyLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    holdKeyLabel:SetPoint("TOPLEFT", visibilityDropdown, "BOTTOMLEFT", 15, -10)
+    holdKeyLabel:SetText("Hold Key:")
+
+    local holdKeyDropdown = CreateFrame("DropDownMenu", "HearthsHoldKeyDropdown", panel, "UIDropDownMenuTemplate")
+    holdKeyDropdown:SetPoint("TOPLEFT", holdKeyLabel, "BOTTOMLEFT", -15, -5)
+    UIDropDownMenu_SetWidth(holdKeyDropdown, 100)
+    UIDropDownMenu_SetText(holdKeyDropdown, HearthsDB.holdKey or "ALT")
+
+    local function HoldKeyDropdown_OnClick(self)
+        HearthsDB.holdKey = self.value
+        UIDropDownMenu_SetText(holdKeyDropdown, self:GetText())
+        DebugPrint("Hold key changed to: " .. self.value)
+        CloseDropDownMenus()
+    end
+
+    local function HoldKeyDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        local keys = {"ALT", "CTRL", "SHIFT"}
+
+        for _, key in ipairs(keys) do
+            info.text = key
+            info.value = key
+            info.func = HoldKeyDropdown_OnClick
+            info.checked = HearthsDB.holdKey == key
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+
+    UIDropDownMenu_Initialize(holdKeyDropdown, HoldKeyDropdown_Initialize)
+
+    -- Toggle Key Dropdown
+    local toggleKeyLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    toggleKeyLabel:SetPoint("TOPLEFT", holdKeyDropdown, "BOTTOMLEFT", 15, -10)
+    toggleKeyLabel:SetText("Toggle Key:")
+
+    local toggleKeyDropdown = CreateFrame("DropDownMenu", "HearthsToggleKeyDropdown", panel, "UIDropDownMenuTemplate")
+    toggleKeyDropdown:SetPoint("TOPLEFT", toggleKeyLabel, "BOTTOMLEFT", -15, -5)
+    UIDropDownMenu_SetWidth(toggleKeyDropdown, 100)
+    UIDropDownMenu_SetText(toggleKeyDropdown, HearthsDB.toggleKey or "CTRL-H")
+
+    local function ToggleKeyDropdown_OnClick(self)
+        HearthsDB.toggleKey = self.value
+        UIDropDownMenu_SetText(toggleKeyDropdown, self:GetText())
+        DebugPrint("Toggle key changed to: " .. self.value)
+        CloseDropDownMenus()
+    end
+
+    local function ToggleKeyDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        local keys = {"CTRL-H", "ALT-H", "SHIFT-H", "CTRL-T", "ALT-T", "SHIFT-T"}
+
+        for _, key in ipairs(keys) do
+            info.text = key
+            info.value = key
+            info.func = ToggleKeyDropdown_OnClick
+            info.checked = HearthsDB.toggleKey == key
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+
+    UIDropDownMenu_Initialize(toggleKeyDropdown, ToggleKeyDropdown_Initialize)
+
     -- Header for individual selections
     local customHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    customHeader:SetPoint("TOPLEFT", useAllCheckbox, "BOTTOMLEFT", 0, -20)
+    customHeader:SetPoint("TOPLEFT", toggleKeyDropdown, "BOTTOMLEFT", 15, -20)
     customHeader:SetText("Individual Hearthstone Selection:")
 
     -- Container for individual hearthstone checkboxes
@@ -563,6 +839,20 @@ local function CreateOptionsPanel()
         -- Set initial states
         debugCheckbox:SetChecked(HearthsDB.debug)
         useAllCheckbox:SetChecked(HearthsDB.useAllHearthstones)
+
+        -- Set visibility dropdown text
+        local visibilityTexts = {
+            always = "Always Visible",
+            never = "Never Visible",
+            combat = "In Combat Only",
+            out_of_combat = "Out of Combat Only",
+            hold = "Hold Key to Show",
+            toggle = "Toggle with Key"
+        }
+        UIDropDownMenu_SetText(visibilityDropdown, visibilityTexts[HearthsDB.visibilityMode] or "Always Visible")
+        UIDropDownMenu_SetText(holdKeyDropdown, HearthsDB.holdKey or "ALT")
+        UIDropDownMenu_SetText(toggleKeyDropdown, HearthsDB.toggleKey or "CTRL-H")
+
         for _, checkbox in pairs(panel.hearthstoneCheckboxes) do
             if HearthsDB.useAllHearthstones then
                 checkbox:SetChecked(true)
@@ -667,7 +957,7 @@ function SetupRandomHearthstone()
     -- Update the button for the new hearthstone or hide it if none selected
     if currentHearthstone then
         UpdateButtonForHearthstone(currentHearthstone)
-        frame:Show()
+        UpdateButtonVisibility()
     else
         -- Hide the button when no hearthstones are enabled
         frame:Hide()
@@ -686,7 +976,8 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("LOADING_SCREEN_DISABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
-eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED") -- Entering combat
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Leaving combat
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         DebugPrint("Addon loaded, initializing SavedVariables")
@@ -709,11 +1000,27 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- Hearthstone cast was interrupted
         pendingRotation = false
         DebugPrint("Hearthstone interrupted, not rotating")
-    elseif event == "PLAYER_REGEN_ENABLED" and pendingRotation then
-        -- Combat ended and we have a pending rotation
-        SetupRandomHearthstone()
-        pendingRotation = false
-        DebugPrint("Combat ended, rotated hearthstone")
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        -- Entering combat
+        inCombat = true
+        DebugPrint("Entered combat")
+        if HearthsDB.visibilityMode == "combat" or HearthsDB.visibilityMode == "out_of_combat" then
+            UpdateButtonVisibility()
+        end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Leaving combat
+        inCombat = false
+        DebugPrint("Left combat")
+        if HearthsDB.visibilityMode == "combat" or HearthsDB.visibilityMode == "out_of_combat" then
+            UpdateButtonVisibility()
+        end
+        
+        -- Also handle pending rotation when combat ends
+        if pendingRotation then
+            SetupRandomHearthstone()
+            pendingRotation = false
+            DebugPrint("Combat ended, rotated hearthstone")
+        end
     end
 end)
 
@@ -753,11 +1060,29 @@ SlashCmdList["HEARTHS"] = function(msg)
             optionsPanel.RefreshHearthstoneList()
         end
         Settings.OpenToCategory(optionsPanel.category:GetID())
+    elseif command == "toggle" then
+        if HearthsDB.visibilityMode == "toggle" then
+            ToggleButtonVisibility()
+            print("|cFF00FF00[Hearths]|r Button toggled " .. (toggledVisible and "visible" or "hidden"))
+        else
+            print("|cFF00FF00[Hearths]|r Toggle command only works in 'Toggle with Key' visibility mode")
+        end
+    elseif command == "show" then
+        if HearthsDB.visibilityMode ~= "always" then
+            local oldMode = HearthsDB.visibilityMode
+            HearthsDB.visibilityMode = "always"
+            UpdateButtonVisibility()
+            print("|cFF00FF00[Hearths]|r Visibility mode temporarily set to 'always' (was '" .. oldMode .. "')")
+        else
+            print("|cFF00FF00[Hearths]|r Button is already set to always visible")
+        end
     else
         print("|cFF00FF00[Hearths]|r Commands:")
         print("  /hearths debug on|off - Toggle debug logging")
         print("  /hearths reset - Reset button position to center")
         print("  /hearths options - Open options panel")
+        print("  /hearths toggle - Toggle button visibility (toggle mode only)")
+        print("  /hearths show - Temporarily show button (sets to always visible)")
         print("  Hold Alt and drag to move the button")
     end
 end

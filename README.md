@@ -41,6 +41,8 @@ Access via Interface → AddOns → Hearths or `/hearths options`
 
 - ElvUI integration
 - Masque support for button skinning
+- Button Scaling
+- Button Keybinds
 
 ## License
 

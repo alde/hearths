@@ -27,6 +27,7 @@ local function InitializeSavedVars()
     end
     HearthsDB.enabledHearthstones = HearthsDB.enabledHearthstones or {}
     HearthsDB.visibilityMode = HearthsDB.visibilityMode or "always"
+    HearthsDB.usageStats = HearthsDB.usageStats or {}
 
     if wasNew then
         DebugPrint("SavedVariables initialized for first time - useAllHearthstones: " .. tostring(HearthsDB.useAllHearthstones))
@@ -81,6 +82,64 @@ local function UpdateButtonVisibility()
     if mode == "never" then
         frame:Hide()
         return
+    end
+end
+
+-- Bad luck protection: Select hearthstone with weighted randomness
+local function SelectHearthstoneWithLuckProtection(availableHearthstones)
+    if #availableHearthstones == 0 then
+        return nil
+    end
+
+    -- First check for any new hearthstones (0 uses) - always prioritize these
+    for _, hearthstone in ipairs(availableHearthstones) do
+        local usage = HearthsDB.usageStats[hearthstone.id] or 0
+        if usage == 0 then
+            DebugPrint("Selected new hearthstone (0 uses): " .. hearthstone.name)
+            return hearthstone
+        end
+    end
+
+    -- No new hearthstones, use weighted selection based on usage
+    local maxUsage = 0
+    for _, hearthstone in ipairs(availableHearthstones) do
+        local usage = HearthsDB.usageStats[hearthstone.id] or 0
+        if usage > maxUsage then
+            maxUsage = usage
+        end
+    end
+
+    -- Calculate weights (higher for less used hearthstones)
+    local weights = {}
+    local totalWeight = 0
+    for _, hearthstone in ipairs(availableHearthstones) do
+        local usage = HearthsDB.usageStats[hearthstone.id] or 0
+        local weight = maxUsage - usage + 1  -- Ensure minimum weight of 1
+        weights[hearthstone] = weight
+        totalWeight = totalWeight + weight
+        DebugPrint("  " .. hearthstone.name .. ": usage=" .. usage .. ", weight=" .. weight)
+    end
+
+    -- Select based on weights
+    local randomValue = math.random() * totalWeight
+    local currentWeight = 0
+    for _, hearthstone in ipairs(availableHearthstones) do
+        currentWeight = currentWeight + weights[hearthstone]
+        if randomValue <= currentWeight then
+            DebugPrint("Selected by weight: " .. hearthstone.name .. " (usage: " .. (HearthsDB.usageStats[hearthstone.id] or 0) .. ")")
+            return hearthstone
+        end
+    end
+
+    -- Fallback to first available (should never reach here)
+    return availableHearthstones[1]
+end
+
+-- Function to increment usage stats when a hearthstone is used
+local function IncrementHearthstoneUsage(hearthstone)
+    if hearthstone and hearthstone.id then
+        HearthsDB.usageStats[hearthstone.id] = (HearthsDB.usageStats[hearthstone.id] or 0) + 1
+        DebugPrint("Incremented usage for " .. hearthstone.name .. " to " .. HearthsDB.usageStats[hearthstone.id])
     end
 end
 
@@ -228,10 +287,11 @@ local function CreateHearthstoneButton()
             DebugPrint("Selected hearthstone with shortest cooldown at startup: " .. currentHearthstone.name .. " (" .. math.floor(shortestTime) .. "s remaining)")
         end
     else
-        -- Pick a random hearthstone from available ones
-        local randomIndex = math.random(1, #availableHearthstones)
-        currentHearthstone = availableHearthstones[randomIndex]
-        DebugPrint("Selected available hearthstone at startup: " .. currentHearthstone.name)
+        -- Pick a hearthstone using bad luck protection
+        currentHearthstone = SelectHearthstoneWithLuckProtection(availableHearthstones)
+        if currentHearthstone then
+            DebugPrint("Selected available hearthstone at startup: " .. currentHearthstone.name)
+        end
     end
 
     frame = CreateFrame("Button", "Hearths", UIParent, "SecureActionButtonTemplate")
@@ -832,16 +892,18 @@ function SetupRandomHearthstone()
         end
     end
 
-    -- 1. If any are off cooldown, pick one randomly
+    -- 1. If any are off cooldown, pick one using bad luck protection
     if #availableHearthstones > 0 then
-        local randomIndex = math.random(1, #availableHearthstones)
-        currentHearthstone = availableHearthstones[randomIndex]
-        DebugPrint("Selected available hearthstone: " .. currentHearthstone.name)
-    -- 2. If not, pick randomly from those with shortest cooldown
+        currentHearthstone = SelectHearthstoneWithLuckProtection(availableHearthstones)
+        if currentHearthstone then
+            DebugPrint("Selected available hearthstone: " .. currentHearthstone.name)
+        end
+    -- 2. If not, pick from those with shortest cooldown using bad luck protection
     elseif #shortestCooldownHearthstones > 0 then
-        local randomIndex = math.random(1, #shortestCooldownHearthstones)
-        currentHearthstone = shortestCooldownHearthstones[randomIndex]
-        DebugPrint("Selected hearthstone with shortest cooldown: " .. currentHearthstone.name .. " (" .. math.floor(shortestTime) .. "s remaining)")
+        currentHearthstone = SelectHearthstoneWithLuckProtection(shortestCooldownHearthstones)
+        if currentHearthstone then
+            DebugPrint("Selected hearthstone with shortest cooldown: " .. currentHearthstone.name .. " (" .. math.floor(shortestTime) .. "s remaining)")
+        end
     else
         -- No enabled hearthstones found at all
         currentHearthstone = nil
@@ -871,6 +933,7 @@ eventFrame:RegisterEvent("LOADING_SCREEN_DISABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Leaving combat
+eventFrame:RegisterEvent("NEW_TOY_ADDED")  -- New toy learned
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         DebugPrint("Addon loaded, initializing SavedVariables")
@@ -881,6 +944,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         -- But only if not in combat
         C_Timer.After(2.0, function()
             if pendingRotation and not UnitAffectingCombat("player") then
+                -- Increment usage for the hearthstone that was just used
+                if currentHearthstone then
+                    IncrementHearthstoneUsage(currentHearthstone)
+                end
                 SetupRandomHearthstone()
                 pendingRotation = false
                 DebugPrint("Loading screen ended, rotated hearthstone")
@@ -896,9 +963,46 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Leaving combat - handle pending rotation when combat ends
         if pendingRotation then
+            -- Increment usage for the hearthstone that was just used
+            if currentHearthstone then
+                IncrementHearthstoneUsage(currentHearthstone)
+            end
             SetupRandomHearthstone()
             pendingRotation = false
             DebugPrint("Combat ended, rotated hearthstone")
+        end
+    elseif event == "NEW_TOY_ADDED" then
+        -- Toy collection changed, check for new hearthstones
+        DebugPrint("Toy collection updated, rescanning for hearthstones...")
+        local oldCount = #hearthstoneToys
+        ScanHearthstoneToys()
+        local newCount = #hearthstoneToys
+
+        if newCount > oldCount then
+            DebugPrint("Found " .. (newCount - oldCount) .. " new hearthstone(s)!")
+            -- If we found new hearthstones and no current one is selected, pick one
+            if not currentHearthstone and frame then
+                local availableHearthstones = {}
+                for _, hearthstone in ipairs(hearthstoneToys) do
+                    if not IsOnCooldown(hearthstone) and IsHearthstoneEnabled(hearthstone) then
+                        table.insert(availableHearthstones, hearthstone)
+                    end
+                end
+
+                if #availableHearthstones > 0 then
+                    currentHearthstone = SelectHearthstoneWithLuckProtection(availableHearthstones)
+                    if currentHearthstone then
+                        UpdateButtonForHearthstone(currentHearthstone)
+                        UpdateButtonVisibility()
+                        DebugPrint("Auto-selected new hearthstone: " .. currentHearthstone.name)
+                    end
+                end
+            end
+        end
+
+        -- Refresh options panel if it's open
+        if optionsPanel and optionsPanel:IsShown() and optionsPanel.RefreshHearthstoneList then
+            optionsPanel.RefreshHearthstoneList()
         end
     end
 end)

@@ -448,12 +448,12 @@ function ScanHearthstoneToys()
         DebugPrint("Added to rotation: " .. astralRecall.name)
     end
 
-    -- Scan toy box for hearthstone toys
-    local numToys = C_ToyBox.GetNumFilteredToys()
+    -- Scan toy box for hearthstone toys (ignore current filters)
+    local numToys = C_ToyBox.GetNumToys()
     DebugPrint("Scanning " .. numToys .. " toys in toy box...")
     for i = 1, numToys do
         local toyID = C_ToyBox.GetToyFromIndex(i)
-        if toyID and toyID > 0 and C_ToyBox.IsToyUsable(toyID) then
+        if toyID and toyID > 0 and C_ToyBox.IsToyUsable(toyID) and PlayerHasToy(toyID) then
             local itemID, toyName, icon = C_ToyBox.GetToyInfo(toyID)
 
             if toyName and type(toyName) == "string" then

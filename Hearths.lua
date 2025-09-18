@@ -319,8 +319,16 @@ local function CreateHearthstoneButton()
     -- Custom tooltip with modifier information
     frame:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        if currentHearthstone then
-            GameTooltip:AddLine(currentHearthstone.name, 1, 1, 1, 1)
+
+        local hearthstoneToShow = currentHearthstone
+        if IsShiftKeyDown() and PlayerHasToy(140192) then
+            hearthstoneToShow = { id = 140192, type = "toy", name = "Dalaran Hearthstone" }
+        elseif IsControlKeyDown() and PlayerHasToy(110560) then
+            hearthstoneToShow = { id = 110560, type = "toy", name = "Garrison Hearthstone" }
+        end
+
+        if hearthstoneToShow then
+            GameTooltip:AddLine(hearthstoneToShow.name, 1, 1, 1, 1)
         else
             GameTooltip:AddLine("Hearths (No hearthstone selected)", 1, 0.5, 0.5, 1)
         end
@@ -376,15 +384,54 @@ local function CreateHearthstoneButton()
         end
     end)
 
-    -- Update cooldown display (throttled to 1 second intervals)
+    -- Update cooldown display and modifier keys
     frame:SetScript("OnUpdate", function(self, elapsed)
-        lastCooldownCheck = lastCooldownCheck + elapsed
+        -- Modifier key checks (run every frame for responsiveness)
+        local shiftDown = IsShiftKeyDown()
+        local ctrlDown = IsControlKeyDown()
+        local modifierStateChanged = self.lastShiftDown ~= shiftDown or self.lastCtrlDown ~= ctrlDown
 
-        if lastCooldownCheck >= 1.0 and currentHearthstone then
+        if modifierStateChanged then
+            self.lastShiftDown = shiftDown
+            self.lastCtrlDown = ctrlDown
+
+            local hearthstoneToSet = currentHearthstone
+            if shiftDown and PlayerHasToy(140192) then
+                hearthstoneToSet = { id = 140192, type = "toy", name = "Dalaran Hearthstone", icon = select(3, C_ToyBox.GetToyInfo(140192)) }
+            elseif ctrlDown and PlayerHasToy(110560) then
+                hearthstoneToSet = { id = 110560, type = "toy", name = "Garrison Hearthstone", icon = select(3, C_ToyBox.GetToyInfo(110560)) }
+            end
+
+            if hearthstoneToSet and hearthstoneToSet.icon then
+                frame:SetNormalTexture(hearthstoneToSet.icon)
+            elseif currentHearthstone and currentHearthstone.icon then
+                frame:SetNormalTexture(currentHearthstone.icon)
+            end
+
+            if frame:IsMouseOver() then
+                frame:GetScript("OnEnter")(frame)
+            end
+        end
+
+        -- Cooldown checks (throttled to 1-second intervals)
+        lastCooldownCheck = lastCooldownCheck + elapsed
+        if lastCooldownCheck >= 1.0 then
             lastCooldownCheck = 0
-            local startTime, duration = GetCooldownInfo(currentHearthstone)
-            if duration > 0 then
-                cooldownFrame:SetCooldown(startTime, duration)
+
+            local hearthstoneForCooldown = currentHearthstone
+            if shiftDown and PlayerHasToy(140192) then
+                hearthstoneForCooldown = { id = 140192, type = "toy" }
+            elseif ctrlDown and PlayerHasToy(110560) then
+                hearthstoneForCooldown = { id = 110560, type = "toy" }
+            end
+
+            if hearthstoneForCooldown then
+                local startTime, duration = GetCooldownInfo(hearthstoneForCooldown)
+                if duration > 0 then
+                    cooldownFrame:SetCooldown(startTime, duration)
+                else
+                    cooldownFrame:Clear()
+                end
             else
                 cooldownFrame:Clear()
             end

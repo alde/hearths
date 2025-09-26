@@ -876,9 +876,20 @@ end
 
 -- Retry mechanism for initialization
 local initializationRetries = 0
+local initializationInProgress = false
+local isInitialized = false
 local maxRetries = 3
 
 local function AttemptInitialization()
+    if isInitialized then
+        return
+    end
+    if initializationInProgress then
+        DebugPrint("Initialization already in progress, skipping this attempt")
+        return
+    end
+    initializationInProgress = true
+
     initializationRetries = initializationRetries + 1
     DebugPrint("Initialization attempt " .. initializationRetries .. "/" .. maxRetries)
 
@@ -891,16 +902,16 @@ local function AttemptInitialization()
         CreateHearthstoneButton()
         if not optionsPanel then
             optionsPanel = CreateOptionsPanel()
-            -- Refresh the hearthstone list after scanning
-            if optionsPanel.RefreshHearthstoneList then
-                optionsPanel.RefreshHearthstoneList()
-            end
         end
+        initializationInProgress = false
+        isInitialized = true
     else
         if initializationRetries < maxRetries then
+            initializationInProgress = false
             DebugPrint("Initialization failed, retrying in 3 seconds...")
             C_Timer.After(3, AttemptInitialization)
         else
+            initializationInProgress = false
             DebugPrint("Initialization failed after " .. maxRetries .. " attempts. Toy box or SavedVariables may not be ready.")
         end
     end
@@ -981,6 +992,7 @@ eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Leaving combat
 eventFrame:RegisterEvent("NEW_TOY_ADDED")  -- New toy learned
+eventFrame:RegisterEvent("TOYS_UPDATED")  -- Toy collection data updated
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         DebugPrint("Addon loaded, initializing SavedVariables")

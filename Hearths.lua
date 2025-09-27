@@ -987,17 +987,19 @@ end
 local eventFrame = CreateFrame("Frame")
 local optionsPanel = nil
 eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("LOADING_SCREEN_DISABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Leaving combat
 eventFrame:RegisterEvent("NEW_TOY_ADDED")  -- New toy learned
-eventFrame:RegisterEvent("TOYS_UPDATED")  -- Toy collection data updated
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         DebugPrint("Addon loaded, initializing SavedVariables")
         InitializeSavedVars()
-        C_Timer.After(1, AttemptInitialization)
+    elseif event == "PLAYER_LOGIN" then
+        DebugPrint("Player logged in, attempting initialization")
+        AttemptInitialization()
     elseif (event == "LOADING_SCREEN_DISABLED" or event == "UNIT_SPELLCAST_STOP") and pendingRotation then
         -- Loading screen ended, delay rotation to ensure cooldowns are updated
         -- But only if not in combat

@@ -541,8 +541,8 @@ function ScanHearthstoneToys()
     DebugPrint("Starting hearthstone scan...")
     hearthstoneToys = {}
 
-    -- Add the default hearthstone if enabled
-    if HearthsDB.includeStandardHearthstone then
+    -- Add the default hearthstone if enabled and owned
+    if HearthsDB.includeStandardHearthstone and GetItemCount(6948) > 0 then
         local defaultHearthstone = {
             id = 6948,
             name = "Hearthstone",

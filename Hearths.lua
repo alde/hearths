@@ -8,6 +8,7 @@ local pendingRotation = false
 local lastCooldownCheck = 0
 local buttonVisible = true
 local mouseoverVisible = false
+local boundLocation = nil
 
 -- Debug print function
 local function DebugPrint(msg)
@@ -338,6 +339,7 @@ local function CreateHearthstoneButton()
 
         if hearthstoneToShow then
             GameTooltip:AddLine(hearthstoneToShow.name, 1, 1, 1, 1)
+            GameTooltip:AddLine("Target: |cFFFF8000" .. boundLocation .. "|r", 1, 1, 1, 1)
         else
             GameTooltip:AddLine("Hearths (No hearthstone selected)", 1, 0.5, 0.5, 1)
         end
@@ -577,23 +579,13 @@ function ScanHearthstoneToys()
             if toyName and type(toyName) == "string" then
                 -- Get the item description using the GameTooltip method
                 local description = GetItemDescription(toyID)
-
-                -- Check for multiple hearthstone description patterns
                 local isHearthstone = false
-                if string.find(description, "Speak to an Innkeeper in a different place to change your home location") then
+                if string.find(description, "Returns you to (.*).") then
+                    DebugPrint(description)
                     isHearthstone = true
-                elseif string.find(description, "Return to your home location") then
-                    isHearthstone = true
-                elseif string.find(description, "Return to your hearth") then
-                    isHearthstone = true
-                elseif string.find(description, "Return to your inn") then
-                    isHearthstone = true
-                elseif string.find(description, "Return to your home") then
-                    isHearthstone = true
-                elseif string.find(description, "Use: Return to your home") then
-                    isHearthstone = true
-                elseif string.find(description, "Use: Return to your hearth") then
-                    isHearthstone = true
+                    if boundLocation == nil then
+                        boundLocation = string.match(description, "Returns you to ([^%.]+).")
+                    end
                 end
 
                 if isHearthstone then

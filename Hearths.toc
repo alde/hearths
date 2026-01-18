@@ -1,6 +1,6 @@
 ## Interface: 110200
 ## Title: Hearths
-## Version: 0.13
+## Version: 0.14
 ## Notes: Hearthstone Rotation
 ## Author: Rickard Dybeck
 ## SavedVariablesPerCharacter: HearthsDB

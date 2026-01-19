@@ -339,7 +339,9 @@ local function CreateHearthstoneButton()
 
         if hearthstoneToShow then
             GameTooltip:AddLine(hearthstoneToShow.name, 1, 1, 1, 1)
-            GameTooltip:AddLine("Target: |cFFFF8000" .. boundLocation .. "|r", 1, 1, 1, 1)
+            if boundLocation then
+                GameTooltip:AddLine("Target: |cFFFF8000" .. boundLocation .. "|r", 1, 1, 1, 1)
+            end
         else
             GameTooltip:AddLine("Hearths (No hearthstone selected)", 1, 0.5, 0.5, 1)
         end

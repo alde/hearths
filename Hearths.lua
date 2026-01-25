@@ -540,6 +540,26 @@ local function GetItemDescription(itemID)
     return descriptionText
 end
 
+function shouldIncludeToy(toyID)
+    if not toyID and toyID == 0 then
+        return false
+    end
+    if toyID == 140192 then
+        return false -- Dalaran Hearthstone
+    end
+    if toyID == 110560 then
+        return false -- Garrison
+    end 
+    if not C_ToyBox.IsToyUsable(toyID) then
+        return false
+    end 
+    if not PlayerHasToy(toyID) then
+        return false
+    end
+
+    return true
+end
+
 -- Scan for hearthstone toys the player owns
 function ScanHearthstoneToys()
     DebugPrint("Starting hearthstone scan...")
@@ -575,7 +595,7 @@ function ScanHearthstoneToys()
     DebugPrint("Scanning " .. numToys .. " toys in toy box...")
     for i = 1, numToys do
         local toyID = C_ToyBox.GetToyFromIndex(i)
-        if toyID and toyID > 0 and C_ToyBox.IsToyUsable(toyID) and PlayerHasToy(toyID) then
+        if shouldIncludeToy(toyID)then
             local itemID, toyName, icon = C_ToyBox.GetToyInfo(toyID)
 
             if toyName and type(toyName) == "string" then
@@ -702,7 +722,7 @@ local function CreateOptionsPanel()
     -- Use All Hearthstones checkbox
     local useAllCheckbox = CreateFrame("CheckButton", "HearthsUseAllCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
     useAllCheckbox:SetPoint("TOPLEFT", keybindCurrent, "BOTTOMLEFT", 0, -10)
-    useAllCheckbox.Text:SetText("Use All Hearthstones")
+    useAllCheckbox.Text:SetText("Use All Hearthstone Toys")
 
     -- Include Standard Hearthstone checkbox
     local includeStandardCheckbox = CreateFrame("CheckButton", "HearthsIncludeStandardCheckbox", panel, "InterfaceOptionsCheckButtonTemplate")
@@ -720,11 +740,7 @@ local function CreateOptionsPanel()
     useAllCheckbox:SetScript("OnClick", function(self)
         HearthsDB.useAllHearthstones = self:GetChecked()
         if HearthsDB.useAllHearthstones then
-            DebugPrint("Enabled all hearthstones for rotation")
-            -- Also enable standard hearthstone
-            HearthsDB.includeStandardHearthstone = true
-            includeStandardCheckbox:SetChecked(true)
-            includeStandardCheckbox:SetEnabled(false)
+            DebugPrint("Enabled all hearthstone toys for rotation")
 
             for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
                 checkbox:SetChecked(true)
@@ -732,7 +748,6 @@ local function CreateOptionsPanel()
             end
         else
             DebugPrint("Switched to custom hearthstone selection")
-            includeStandardCheckbox:SetEnabled(true)
             for _, checkbox in pairs(panel.hearthstoneCheckboxes or {}) do
                 checkbox:SetEnabled(true)
                 checkbox:SetChecked(HearthsDB.enabledHearthstones[checkbox.hearthstoneId] == true)

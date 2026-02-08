@@ -1,0 +1,39 @@
+# .gitignore - Files to exclude from version control
+
+# External dependencies (managed by .pkgmeta)
+Libs/
+
+# Test coverage and reports
+luacov.*.out
+luacov.report.out
+luacov.stats.out
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Build artifacts
+*.zip
+*.tar.gz
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Backup files
+*.bak
+*.backup

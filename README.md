@@ -1,59 +1,42 @@
 # Hearths
 
-Random hearthstone rotation addon for World of Warcraft.
+A WoW addon that randomly selects from your hearthstone toys, with cooldown management and Shaman Astral Recall support.
 
 ## What it does
 
-Provides a single button that cycles through your hearthstone collection. Automatically detects all hearthstones in your toy box and only uses ones that are off cooldown.
+Creates and manages a macro named `HEARTHS_BTN` that casts a random hearthstone from your collection. Drag it to your action bars from the options panel or from `/macro`.
 
 ## Features
 
-- Automatic hearthstone detection
-- Smart cooldown management
-- Custom hearthstone selection via options panel
-- Button visibility modes (always visible, never visible, show on mouseover)
-- Keybinding support for random hearthstone usage
-- Additional keybindings for Dalaran and Garrison hearthstones
-- Moveable button (Alt+drag)
-- Works with Shaman Astral Recall
-
-## Usage
-
-**Button Interactions:**
-- **Left-click**: Use current hearthstone and rotate to next
-- **Shift-click**: Dalaran Hearthstone (if available)
-- **Ctrl-click**: Garrison Hearthstone (if available)
-- **Alt-drag**: Move button
-
-**Keybindings:**
-- Configure in Interface → Key Bindings → Hearths
-- Available bindings:
-  - "Use Random Hearthstone" - Uses current hearthstone and rotates to next
-  - "Use Dalaran Hearthstone" - Direct access to Dalaran Hearthstone (if owned)
-  - "Use Garrison Hearthstone" - Direct access to Garrison Hearthstone (if owned)
-- Shows current binding status in settings panel
+- Scans your toy box for all hearthstone toys automatically
+- Randomizes hearthstone selection on each use
+- Cooldown handling (skips toys on cooldown)
+- Optional Shaman Astral Recall fallback when toys are on cooldown
+- Modifier keys - Shift for Dalaran Hearthstone, Ctrl for Garrison Hearthstone
+- Configurable keybinding
+- Excludes non-hearthstone toys with tooltips that look like hearthstones
 
 ## Commands
 
-```
-/hearths             - Open settings panel
-```
+- `/hearths` - Open settings panel
+- `/hearths list` - Show currently enabled hearthstones
+- `/hearths refresh` - Rescan toys and re-roll selection
+- `/hearths debug on|off` - Enable/disable debug logging
 
 ## Options
 
-Access via `/hearths` command
+Available in the WoW addon settings panel (Options > Addons > Hearths) or via `/hearths`.
 
-- **Visibility modes**: Always visible, never visible, show on mouseover
-- **Debug logging**: Toggle debug output
-- **Hearthstone selection**: Choose "Use All" or select specific hearthstones
-- **Individual toggles**: Enable/disable specific hearthstones with icons
-- **Keybinding status**: Shows current keybinding configuration
+- Pick Up Macro: Click to put the HEARTHS_BTN macro on your cursor for action bar placement
+- Use All Hearthstone Toys: Include all detected hearthstone toys in rotation
+- Include Default Hearthstone: Add the standard Hearthstone item to rotation (if available)
+- Include Astral Recall: Add Astral Recall for Shaman characters
+- Individual Hearthstone Toggles: Fine-grained control when "Use All" is disabled
+- Keybinding: Custom hotkey (With hard-coded modifiers Shift for Dalaran, Ctrl for Garrison)
 
-## TODO
+## Dependencies
 
-- ElvUI integration
-- Masque support for button skinning
-- Button scaling options
+Ace3 libraries managed via `.pkgmeta` for CurseForge packaging.
 
 ## License
 

@@ -1,0 +1,80 @@
+# .pkgmeta - CurseForge packaging configuration for Hearths addon
+# This file tells CurseForge to automatically include external dependencies
+# instead of bundling Ace3 libraries directly with the addon
+
+package-as: Hearths
+
+externals:
+  # Ace3 libraries - CurseForge will automatically include these
+  Libs/LibStub:
+    url: https://repos.wowace.com/wow/libstub/trunk
+    tag: latest
+
+  Libs/CallbackHandler-1.0:
+    url: https://repos.wowace.com/wow/callbackhandler/trunk/CallbackHandler-1.0
+    tag: latest
+
+  Libs/AceAddon-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceAddon-3.0
+    tag: latest
+
+  Libs/AceEvent-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceEvent-3.0
+    tag: latest
+
+  Libs/AceDB-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceDB-3.0
+    tag: latest
+
+  Libs/AceDBOptions-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceDBOptions-3.0
+    tag: latest
+
+  Libs/AceConsole-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceConsole-3.0
+    tag: latest
+
+  Libs/AceGUI-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceGUI-3.0
+    tag: latest
+
+  Libs/AceConfig-3.0:
+    url: https://repos.wowace.com/wow/ace3/trunk/AceConfig-3.0
+    tag: latest
+
+# Files to ignore in packaging
+ignore:
+  # Development files
+  - .busted
+  - .gitignore
+  - .pkgmeta
+
+  # Test files
+  - spec/
+
+  # Documentation that's not needed in packaged addon
+  - README.md
+  - LICENSE
+
+  # Development tools
+  - rockspec
+  - Makefile
+
+  # IDE files
+  - .vscode/
+  - .idea/
+  - *.swp
+  - *.swo
+  - .DS_Store
+
+# Optional: Automatically create releases
+# This would create a release when you push a git tag
+# enable-nolib-creation: yes
+
+# Manual build information
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+# License information (optional)
+license-output: LICENSE

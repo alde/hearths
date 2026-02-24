@@ -246,11 +246,7 @@ end
 function App:IsOnCooldown(id, kind)
 	local duration = 0
 	if kind == "spell" then
-		local spellInfo = C_Spell.GetSpellCooldown(id)
-		if not spellInfo then
-			return false
-		end
-		_, duration = spellInfo
+		_, duration = C_Spell.GetSpellCooldown(id)
 	else
 		_, duration = C_Item.GetItemCooldown(id)
 	end

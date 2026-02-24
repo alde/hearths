@@ -42,39 +42,5 @@ externals:
     url: https://repos.wowace.com/wow/ace3/trunk/AceConfig-3.0
     tag: latest
 
-# Files to ignore in packaging
-ignore:
-  # Development files
-  - .busted
-  - .gitignore
-  - .pkgmeta
-
-  # Test files
-  - spec/
-
-  # Documentation that's not needed in packaged addon
-  - README.md
-  - LICENSE
-
-  # Development tools
-  - rockspec
-  - Makefile
-
-  # IDE files
-  - .vscode/
-  - .idea/
-  - *.swp
-  - *.swo
-  - .DS_Store
-
-# Optional: Automatically create releases
-# This would create a release when you push a git tag
-# enable-nolib-creation: yes
-
-# Manual build information
-manual-changelog:
-  filename: CHANGELOG.md
-  markup-type: markdown
-
 # License information (optional)
 license-output: LICENSE

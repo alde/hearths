@@ -1,6 +1,6 @@
 ## Interface: 120000, 120001, 110200
 ## Title: Hearths
-## Version: 1.0
+## Version: 23
 ## Notes: Hearthstone Rotation
 ## Author: Rickard Dybeck
 ## SavedVariablesPerCharacter: HearthsDB
@@ -10,7 +10,7 @@
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
 Libs\AceAddon-3.0\AceAddon-3.0.xml
-Libs\AceEvent-3.0\AceEvent-3.0.xml 
+Libs\AceEvent-3.0\AceEvent-3.0.xml
 Libs\AceDB-3.0\AceDB-3.0.xml
 Libs\AceDBOptions-3.0\AceDBOptions-3.0.xml
 Libs\AceConsole-3.0\AceConsole-3.0.xml

@@ -168,5 +168,4 @@ end
 
 function UI:ShowErrorMessage(message)
 	Hearths.Debug:Log("UI", "Error", message)
-	Hearths:Print("WARNING: " .. message)
 end

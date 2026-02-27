@@ -21,10 +21,6 @@ function App:Initialize()
 	self.scanningTooltip = nil
 	self.isScanning = false
 	self.retryAttempts = 0
-
-	if Hearths.db.profile.debugMode then
-		Hearths.Debug.settings.enabled = true
-	end
 end
 
 function App:OnPlayerEnteringWorld()
@@ -85,6 +81,7 @@ end
 
 function App:RefreshSelectedHearthstone()
 	local candidates = self:GetEnabledHearthstones()
+	Hearths.Debug:Log("App", "Candidates", "Number of enabled hearthstones: ".. tostring(#candidates))
 	local availableCandidates = {}
 
 	for _, hearthstone in pairs(candidates) do
@@ -180,7 +177,7 @@ function App:GetAvailableHearthstones()
 
 			-- Get item description by scanning the tooltip
 			local description = self:GetItemDescription(toyId)
-			local hasHearthstoneDescription = string.match(description, "Returns you to ([^%.]+)")
+			local hasHearthstoneDescription = string.match(description, "Speak to an Innkeeper in a different place to change your home location.")
 			if hasHearthstoneDescription then
 				local hearthstoneToy = {
 					id = toyId,
@@ -253,7 +250,12 @@ function App:IsOnCooldown(id, kind)
 	if not duration then
 		return false
 	end
-	return duration > 0
+	if duration > 0 then
+		Hearths.Debug:Log("IsOnCooldown", id .. " (" .. kind .. ")", true)
+		return true
+	end
+	Hearths.Debug:Log("IsOnCooldown", id .. " (" .. kind .. ")", false)
+	return false
 end
 
 -- Is the Player a Shaman

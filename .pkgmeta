@@ -44,3 +44,6 @@ externals:
 
 # License information (optional)
 license-output: LICENSE
+
+ignore:
+  - download_deps.sh

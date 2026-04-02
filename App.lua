@@ -14,6 +14,11 @@ local FAKE_HEARTHSTONE_IDS = {
 	[95568] = true, -- Sunreaver Beacon
 }
 
+-- Toys restricted to specific races (race file tokens)
+local RACE_RESTRICTED_TOYS = {
+	[210455] = { ["Draenei"] = true, ["LightforgedDraenei"] = true }, -- Draenic Hologem
+}
+
 local RETRY_DELAY_SECONDS = 1
 local MAX_RETRY_ATTEMPTS = 10
 
@@ -207,6 +212,8 @@ function App:ShouldIncludeToy(toyID)
 		return false
 	elseif not PlayerHasToy(toyID) then
 		return false
+	elseif not self:MeetsRaceRestriction(toyID) then
+		return false
 	end
 
 	return true
@@ -256,6 +263,15 @@ function App:IsOnCooldown(id, kind)
 	end
 	Hearths.Debug:Log("IsOnCooldown", id .. " (" .. kind .. ")", false)
 	return false
+end
+
+function App:MeetsRaceRestriction(toyID)
+	local allowedRaces = RACE_RESTRICTED_TOYS[toyID]
+	if not allowedRaces then
+		return true
+	end
+	local _, raceFile = UnitRace("player")
+	return allowedRaces[raceFile] == true
 end
 
 -- Is the Player a Shaman

@@ -1,6 +1,6 @@
-## Interface: 120005, 120001
+## Interface: 120007, 120005, 120001
 ## Title: Hearths
-## Version: 27
+## Version: 28
 ## Notes: Hearthstone Rotation
 ## Author: Rickard Dybeck
 ## SavedVariablesPerCharacter: HearthsDB

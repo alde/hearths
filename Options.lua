@@ -6,6 +6,8 @@ Hearths.defaults = {
 		enabledHearthstones = {},
 		availableHearthstones = {},
 		debugMode = false,
+		showCustomButton = false,
+		customButtonPosition = nil,
 	},
 }
 
@@ -76,15 +78,21 @@ Hearths.options = {
 			order = 5,
 			inline = true,
 			args = {
-				debugMode = {
+				showCustomButton = {
 					type = "toggle",
 					order = 1,
+					name = "Show Custom Button",
+					desc = "Show a movable on-screen button for your hearthstone. Alt-drag to reposition.",
+				},
+				debugMode = {
+					type = "toggle",
+					order = 2,
 					name = "Debug Mode",
 					desc = "Enable or Disable debug output",
 				},
 				hearthsKeybinding = {
 					type = "keybinding",
-					order = 2,
+					order = 3,
 					name = "keybind",
 					desc = "Random Hearthstone Keybind. Shift for Dalaran, Ctrl for Garrison.",
 				},
@@ -168,6 +176,8 @@ function Hearths:SetValue(info, value)
 
 	if settingKey == "hearthsKeybinding" then
 		self.UI:UpdateKeybinding(previousValue, value)
+	elseif settingKey == "showCustomButton" then
+		self.UI:ToggleCustomButton(value)
 	end
 
 	self.Debug:Log("Setting changed:", settingKey, tostring(value))

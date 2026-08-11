@@ -41,8 +41,10 @@ end
 
 function Hearths:OnEnable()
 	self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
-		self.App:OnPlayerEnteringWorld()
+		-- The app may select a hearthstone synchronously when toy data is ready.
+		-- Create the secure button first so that selection is not discarded.
 		self.UI:OnPlayerEnteringWorld()
+		self.App:OnPlayerEnteringWorld()
 	end)
 	self:RegisterEvent("PLAYER_REGEN_ENABLED", function()
 		self.UI:OnCombatEnd()

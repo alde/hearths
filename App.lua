@@ -19,49 +19,38 @@ local RACE_RESTRICTED_TOYS = {
 	[210455] = { ["Draenei"] = true, ["LightforgedDraenei"] = true }, -- Draenic Hologem
 }
 
-local RETRY_DELAY_SECONDS = 1
-local MAX_RETRY_ATTEMPTS = 10
+local LOGIN_LOAD_DELAY_SECONDS = 3
 
 function App:Initialize()
 	self.scanningTooltip = nil
 	self.isScanning = false
-	self.retryAttempts = 0
 end
 
 function App:OnPlayerEnteringWorld()
+	if self.scanningTooltip then
+		return
+	end
+
 	-- Initialize hidden scanning tooltip for item description parsing
 	self.scanningTooltip = CreateFrame("GameTooltip", "HearthsScanningTooltip", UIParent, "GameTooltipTemplate")
 	self.scanningTooltip:SetOwner(UIParent, "ANCHOR_NONE")
 
-	self:InitializeWithRetry()
+	C_Timer.After(LOGIN_LOAD_DELAY_SECONDS, function()
+		self:LoadCurrentHearthstone()
+	end)
 end
 
 function App:OnNewToyAdded()
 	self:RefreshAvailableHearthstones()
 end
 
-function App:OnLoadingScreenDisabled()
-	-- Delay for toy box data to be ready
-	C_Timer.After(RETRY_DELAY_SECONDS, function()
-		self:RefreshAvailableHearthstones()
-		self:RefreshSelectedHearthstone()
-	end)
-end
-
-function App:InitializeWithRetry()
-	if C_ToyBox.GetNumToys() == 0 then
-		self.retryAttempts = self.retryAttempts + 1
-		if self.retryAttempts <= MAX_RETRY_ATTEMPTS then
-			Hearths.Debug:Log("App", "ToyBox", "Toy box not loaded yet, retrying... (" .. self.retryAttempts .. "/" .. MAX_RETRY_ATTEMPTS .. ")")
-			C_Timer.After(RETRY_DELAY_SECONDS, function() self:InitializeWithRetry() end)
-			return
-		else
-			Hearths.Debug:Log("App", "ToyBox", "Toy box failed to load after " .. MAX_RETRY_ATTEMPTS .. " attempts")
-			return
-		end
+function App:LoadCurrentHearthstone()
+	local currentHearthstone = Hearths.UI:GetCurrentHearthstone()
+	if currentHearthstone then
+		Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", currentHearthstone)
+		return
 	end
 
-	-- Toy box is ready
 	self:RefreshAvailableHearthstones()
 	self:RefreshSelectedHearthstone()
 end

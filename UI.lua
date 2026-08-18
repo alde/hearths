@@ -12,6 +12,30 @@ function UI:OnPlayerEnteringWorld()
 	self.hearthsButton = self:CreateHearthstoneButton()
 end
 
+function UI:GetCurrentHearthstone()
+	local macroIndex = GetMacroIndexByName(self.macroName)
+	if macroIndex == 0 then
+		return nil
+	end
+
+	local _, _, macroBody = GetMacroInfo(macroIndex)
+	if not macroBody then
+		return nil
+	end
+
+	local itemId = tonumber(string.match(macroBody, "#showtooltip%s+item:(%d+)"))
+	if itemId then
+		local defaultId = Hearths.App:GetHearthstoneIDs().DEFAULT
+		return { id = itemId, kind = itemId == defaultId and "item" or "toy" }
+	end
+
+	if string.find(macroBody, "#showtooltip Astral Recall", 1, true) then
+		return { id = Hearths.App:GetHearthstoneIDs().ASTRAL_RECALL, kind = "spell" }
+	end
+
+	return nil
+end
+
 function UI:OnCombatEnd()
 	-- Process any macro updates once out of combat
 	if self.triedRefreshInCombat then

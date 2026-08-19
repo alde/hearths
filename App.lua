@@ -26,18 +26,26 @@ function App:Initialize()
 	self.isScanning = false
 end
 
-function App:OnPlayerEnteringWorld()
-	if self.scanningTooltip then
-		return
+function App:OnPlayerEnteringWorld(isInitialLogin, isReloadingUi)
+	if not self.scanningTooltip then
+		-- Initialize hidden scanning tooltip for item description parsing
+		self.scanningTooltip = CreateFrame("GameTooltip", "HearthsScanningTooltip", UIParent, "GameTooltipTemplate")
+		self.scanningTooltip:SetOwner(UIParent, "ANCHOR_NONE")
 	end
 
-	-- Initialize hidden scanning tooltip for item description parsing
-	self.scanningTooltip = CreateFrame("GameTooltip", "HearthsScanningTooltip", UIParent, "GameTooltipTemplate")
-	self.scanningTooltip:SetOwner(UIParent, "ANCHOR_NONE")
-
-	C_Timer.After(LOGIN_LOAD_DELAY_SECONDS, function()
-		self:LoadCurrentHearthstone()
-	end)
+	if isInitialLogin or isReloadingUi then
+		-- Cold login/reload: toy box data may not be ready yet, so wait
+		-- briefly and just restore whatever the macro already has instead
+		-- of rerolling.
+		C_Timer.After(LOGIN_LOAD_DELAY_SECONDS, function()
+			self:LoadCurrentHearthstone()
+		end)
+	else
+		-- Any other loading screen during play (zoning, portals, hearth use,
+		-- etc.) - rescan and roll a new hearthstone so the macro rotates.
+		self:RefreshAvailableHearthstones()
+		self:RefreshSelectedHearthstone()
+	end
 end
 
 function App:OnNewToyAdded()

@@ -40,9 +40,9 @@ function Hearths:OnInitialize()
 end
 
 function Hearths:OnEnable()
-	self:RegisterEvent("PLAYER_ENTERING_WORLD", function()
+	self:RegisterEvent("PLAYER_ENTERING_WORLD", function(event, isInitialLogin, isReloadingUi)
 		self.UI:OnPlayerEnteringWorld()
-		self.App:OnPlayerEnteringWorld()
+		self.App:OnPlayerEnteringWorld(isInitialLogin, isReloadingUi)
 	end)
 	self:RegisterEvent("PLAYER_REGEN_ENABLED", function()
 		self.UI:OnCombatEnd()

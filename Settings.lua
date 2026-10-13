@@ -24,6 +24,7 @@ local sidebarButtons = {}
 local activeCategory
 local pageBuilders = {}
 local SelectCategory
+local GetScrollRange, UpdateScrollbar, SetScroll
 
 local CATEGORIES = {
 	{ key = "general",    label = "General" },
@@ -87,6 +88,45 @@ local function UpdateSidebarHighlight()
 	end
 end
 
+local SCROLLBAR_W = 4
+local SCROLLBAR_GAP = 14
+local SCROLL_STEP = 40
+local scrollTrack, scrollThumb
+
+function GetScrollRange()
+	if not (scrollFrame and scrollChild) then return 0 end
+	return math.max(0, scrollChild:GetHeight() - scrollFrame:GetHeight())
+end
+
+function UpdateScrollbar()
+	if not scrollTrack then return end
+	local range = GetScrollRange()
+	if range <= 0 then
+		scrollTrack:Hide()
+		if scrollFrame:GetVerticalScroll() ~= 0 then scrollFrame:SetVerticalScroll(0) end
+		return
+	end
+	scrollTrack:Show()
+	local trackH = scrollTrack:GetHeight()
+	local viewH = scrollFrame:GetHeight()
+	local thumbH = math.max(24, trackH * viewH / (viewH + range))
+	scrollThumb:SetHeight(thumbH)
+	local offset = scrollFrame:GetVerticalScroll()
+	if offset > range then
+		offset = range
+		scrollFrame:SetVerticalScroll(range)
+	end
+	scrollThumb:ClearAllPoints()
+	scrollThumb:SetPoint("TOP", scrollTrack, "TOP", 0, -((trackH - thumbH) * offset / range))
+end
+
+function SetScroll(value)
+	if not scrollFrame then return end
+	value = math.max(0, math.min(GetScrollRange(), value or 0))
+	scrollFrame:SetVerticalScroll(value)
+	UpdateScrollbar()
+end
+
 local function ClearContent()
 	if not scrollChild then return end
 	for _, child in ipairs({ scrollChild:GetChildren() }) do
@@ -106,7 +146,7 @@ function SelectCategory(key)
 	scrollChild:SetWidth(CONTENT_W)
 	local y = pageBuilders[key](scrollChild, -CONTENT_PAD)
 	scrollChild:SetHeight(math.abs(y) + CONTENT_PAD)
-	scrollFrame:SetVerticalScroll(0)
+	SetScroll(0)
 end
 
 local function CreatePanel()
@@ -188,14 +228,76 @@ local function CreatePanel()
 		sidebarButtons[i] = CreateSidebarButton(sidebar, catDef, i)
 	end
 
-	scrollFrame = CreateFrame("ScrollFrame", "HearthsSettingsScroll", mainFrame, "UIPanelScrollFrameTemplate")
+	-- Plain scroll frame + thin flat scrollbar (no Blizzard arrows)
+	scrollFrame = CreateFrame("ScrollFrame", "HearthsSettingsScroll", mainFrame)
 	scrollFrame:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", SIDEBAR_W + 1, -(HEADER_H + 2))
-	scrollFrame:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -22, 6)
+	scrollFrame:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -SCROLLBAR_GAP, 6)
 	scrollFrame:EnableMouseWheel(true)
+	scrollFrame:SetScript("OnMouseWheel", function(_, delta)
+		SetScroll(scrollFrame:GetVerticalScroll() - delta * SCROLL_STEP)
+	end)
 
 	scrollChild = CreateFrame("Frame", nil, scrollFrame)
 	scrollChild:SetSize(CONTENT_W, 1)
 	scrollFrame:SetScrollChild(scrollChild)
+	scrollChild:SetScript("OnSizeChanged", function() UpdateScrollbar() end)
+	scrollFrame:SetScript("OnSizeChanged", function() UpdateScrollbar() end)
+
+	scrollTrack = CreateFrame("Frame", nil, mainFrame)
+	scrollTrack:SetWidth(SCROLLBAR_W)
+	scrollTrack:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -6, -(HEADER_H + 4))
+	scrollTrack:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -6, 8)
+	local trackBg = scrollTrack:CreateTexture(nil, "BACKGROUND")
+	trackBg:SetAllPoints()
+	trackBg:SetColorTexture(1, 1, 1, 0.04)
+
+	scrollThumb = CreateFrame("Button", nil, scrollTrack)
+	scrollThumb:SetWidth(SCROLLBAR_W)
+	scrollThumb:SetPoint("TOP", scrollTrack, "TOP", 0, 0)
+	scrollThumb.tex = scrollThumb:CreateTexture(nil, "ARTWORK")
+	scrollThumb.tex:SetAllPoints()
+	scrollThumb.tex:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.45)
+	scrollThumb:SetScript("OnEnter", function(self) self.tex:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.8) end)
+	scrollThumb:SetScript("OnLeave", function(self)
+		if not self.dragging then self.tex:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.45) end
+	end)
+
+	-- Drag the thumb
+	scrollThumb:SetScript("OnMouseDown", function(self)
+		local _, cy = GetCursorPosition()
+		self.dragging = true
+		self.startY = cy / self:GetEffectiveScale()
+		self.startScroll = scrollFrame:GetVerticalScroll()
+	end)
+	scrollThumb:SetScript("OnMouseUp", function(self)
+		self.dragging = false
+		if not self:IsMouseOver() then self.tex:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.45) end
+	end)
+	scrollThumb:SetScript("OnUpdate", function(self)
+		if not self.dragging then return end
+		local _, cy = GetCursorPosition()
+		cy = cy / self:GetEffectiveScale()
+		local range = GetScrollRange()
+		local travel = scrollTrack:GetHeight() - self:GetHeight()
+		if range > 0 and travel > 0 then
+			SetScroll(self.startScroll + (self.startY - cy) * range / travel)
+		end
+	end)
+
+	-- Click on the track to jump a page
+	scrollTrack:EnableMouse(true)
+	scrollTrack:SetScript("OnMouseDown", function()
+		local _, cy = GetCursorPosition()
+		cy = cy / scrollTrack:GetEffectiveScale()
+		local thumbTop = scrollThumb:GetTop() or 0
+		local page = scrollFrame:GetHeight() - SCROLL_STEP
+		if cy > thumbTop then
+			SetScroll(scrollFrame:GetVerticalScroll() - page)
+		else
+			SetScroll(scrollFrame:GetVerticalScroll() + page)
+		end
+	end)
+	scrollTrack:Hide()
 
 	return mainFrame
 end

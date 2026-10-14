@@ -47,8 +47,31 @@ function App:OnPlayerEnteringWorld(isInitialLogin, isReloadingUi)
 	end
 end
 
-function App:OnNewToyAdded()
+function App:OnNewToyAdded(itemId, isRetry)
 	self:RefreshAvailableHearthstones()
+
+	itemId = tonumber(itemId)
+	if not (itemId and Hearths.db.profile.useNewImmediately) then
+		return
+	end
+	-- Only for hearthstones we can actually use and haven't set to Never
+	local info = self.owned[itemId]
+	if not info then
+		-- The toy box can lag the event by a moment; look again once
+		if not isRetry then
+			C_Timer.After(1, function() self:OnNewToyAdded(itemId, true) end)
+		end
+		return
+	end
+	if not self:MeetsRestrictions(itemId) then
+		return
+	end
+	if Hearths:GetPriority(itemId) <= Hearths.PRIORITY.NEVER then
+		return
+	end
+
+	Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", { id = itemId, kind = "toy" })
+	Hearths:Print("New hearthstone! |cffffffff" .. (info.name or itemId) .. "|r is on your Hearths button.")
 end
 
 function App:LoadCurrentHearthstone()
@@ -220,7 +243,8 @@ local function WeightedPick(list)
 	return list[#list]
 end
 
-function App:RefreshSelectedHearthstone()
+-- manual = true when the player asked for it (Re-roll button), so we say what happened
+function App:RefreshSelectedHearthstone(manual)
 	local candidates = self:GetEnabledHearthstones()
 	Hearths.Debug:Log("App", "Candidates", "Number of enabled hearthstones: " .. tostring(#candidates))
 
@@ -251,15 +275,45 @@ function App:RefreshSelectedHearthstone()
 		end
 	end
 
-	if #offCooldown == 0 then
-		Hearths.Debug:Log("App", "Selection", "No hearthstones available or all on cooldown")
-		Hearths:SendMessage("HEARTHS_SELECTION_FAILED", "No hearthstones available or all on cooldown")
+	-- Hearthstone toys share one cooldown, so right after hearthing they're
+	-- ALL on cooldown. Keep rotating anyway instead of freezing the macro.
+	local pool = offCooldown
+	if #pool == 0 then
+		pool = {}
+		local current = Hearths.db.profile.avoidRepeat and #candidates > 1 and Hearths.UI:GetCurrentHearthstone()
+		for _, s in ipairs(candidates) do
+			if not (current and s.id == current.id) then
+				pool[#pool + 1] = s
+			end
+		end
+	end
+
+	if #pool == 0 then
+		Hearths.Debug:Log("App", "Selection", "No hearthstones enabled")
+		Hearths:SendMessage("HEARTHS_SELECTION_FAILED", "No hearthstones enabled - check the Collection page")
+		if manual then
+			Hearths:Print("Nothing to roll - every hearthstone is set to Never (see /hearths collection).")
+		end
 		return nil
 	end
 
-	local selected = WeightedPick(offCooldown)
+	local selected = WeightedPick(pool)
 	Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", selected)
+	if manual then
+		Hearths:Print("Next up: |cffffffff" .. self:GetDisplayName(selected) .. "|r")
+	end
 	return selected
+end
+
+function App:GetDisplayName(stone)
+	if stone.kind == "spell" then
+		return C_Spell.GetSpellName(stone.id) or "Astral Recall"
+	elseif stone.kind == "toy" then
+		local _, name = C_ToyBox.GetToyInfo(stone.id)
+		if name then return name end
+	end
+	local entry = Hearths.Data:Get(stone.id)
+	return C_Item.GetItemNameByID(stone.id) or (entry and entry.name) or tostring(stone.id)
 end
 
 ---------------------------------------------------------------------------

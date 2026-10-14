@@ -170,16 +170,31 @@ function UI:CreateOrUpdateMacroText(hearthstone)
 	local tooltip = self:GetTooltipForHearthstone(hearthstone)
 	local macroText = tooltip .. "\n/click " .. self.hearthsButton:GetName() .. "\n"
 
+	local icon = self:GetIconForHearthstone(hearthstone)
 	local hasMacro = GetMacroIndexByName(self.macroName)
 	if hasMacro > 0 then
 		-- Update existing macro
-		EditMacro(self.macroName, self.macroName, "INV_MISC_QUESTIONMARK", macroText)
+		EditMacro(self.macroName, self.macroName, icon, macroText)
 		Hearths.Debug:Log("UI", "Macro", "Updated macro with " .. tostring(hearthstone.id) .. " (" .. hearthstone.kind .. ")")
 	else
 		-- Create new macro
-		CreateMacro(self.macroName, "INV_MISC_QUESTIONMARK", macroText, true)
+		CreateMacro(self.macroName, icon, macroText, true)
 		Hearths.Debug:Log("UI", "Macro", "Created new macro")
 	end
+end
+
+-- Use the hearthstone's own icon so the action button visibly changes on
+-- every roll (the "?" icon relies on #showtooltip, which can lag for toys).
+function UI:GetIconForHearthstone(hearthstone)
+	local icon
+	if hearthstone.kind == "spell" then
+		icon = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(hearthstone.id)
+	elseif hearthstone.kind == "toy" then
+		local _, _, toyIcon = C_ToyBox.GetToyInfo(hearthstone.id)
+		icon = toyIcon
+	end
+	icon = icon or C_Item.GetItemIconByID(hearthstone.id)
+	return icon or "INV_MISC_QUESTIONMARK"
 end
 
 function UI:GetTooltipForHearthstone(hearthstone)

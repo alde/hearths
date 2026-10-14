@@ -325,7 +325,7 @@ pageBuilders.general = function(parent, y)
 				Hearths:Print("No macro yet. Try /hearths refresh first.")
 			end
 		end, update = function() return GetCursorInfo() and "Cancel Pickup" or "Pick Up Macro" end },
-		{ "Re-roll", function() App:RefreshSelectedHearthstone() end },
+		{ "Re-roll", function() App:RefreshSelectedHearthstone(true) end },
 	}, "Pick up the macro and drop it on an action bar. Shift uses the Dalaran Hearthstone, Ctrl the Garrison Hearthstone."); y = y - h
 	_, h = W:Keybind(parent, "Keybinding", y,
 		function() return db.hearthsKeybinding end,
@@ -354,6 +354,10 @@ pageBuilders.general = function(parent, y)
 		function() return db.avoidRepeat end,
 		function(v) db.avoidRepeat = v end,
 		"Never roll the same hearthstone twice in a row (when you have more than one)."); y = y - h
+	_, h = W:Toggle(parent, "Use New Hearthstones Right Away", y,
+		function() return db.useNewImmediately end,
+		function(v) db.useNewImmediately = v end,
+		"When you learn a new hearthstone toy, put it on the Hearths button immediately so you can try it."); y = y - h
 	_, h = W:Dropdown(parent, "Default Priority", y, Hearths.PRIORITY_LABELS,
 		function() return db.defaultPriority end,
 		function(v)

@@ -39,6 +39,7 @@ Hearths.defaults = {
 		includeDefaultHearthstone = false,
 		includeAstralRecall = false,
 		avoidRepeat = true,
+		useNewImmediately = true, -- put a freshly learned hearthstone on the button right away
 		hearthsKeybinding = nil,
 		debugMode = false,
 	},

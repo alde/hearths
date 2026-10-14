@@ -383,31 +383,17 @@ function W:Keybind(parent, text, y, getValue, setValue, tooltip)
 		end
 	end
 
-	local function Stop()
-		listening = false
-		btn:EnableKeyboard(false)
-		Snap()
-	end
-
 	local IGNORED = {
 		LSHIFT = true, RSHIFT = true, LCTRL = true, RCTRL = true,
 		LALT = true, RALT = true, LMETA = true, RMETA = true, UNKNOWN = true,
 	}
 
-	btn:SetScript("OnClick", function(_, mouse)
-		if InCombatLockdown() then return end
-		if mouse == "RightButton" then
-			setValue(nil)
-			Stop()
-			return
-		end
-		listening = not listening
-		btn:EnableKeyboard(listening)
-		Snap()
-	end)
+	local Stop
 
-	btn:SetScript("OnKeyDown", function(self, key)
-		if not listening then return end
+	-- Only grab the keyboard while waiting for a key. A frame with an
+	-- OnKeyDown script captures ALL keys (incl. Esc and the player's own
+	-- binds), so the handler is attached on Start and removed on Stop.
+	local function OnKeyDown(_, key)
 		if IGNORED[key] then return end
 		if key == "ESCAPE" then
 			Stop()
@@ -419,7 +405,32 @@ function W:Keybind(parent, text, y, getValue, setValue, tooltip)
 		if IsAltKeyDown() then combo = "ALT-" .. combo end
 		setValue(combo)
 		Stop()
+	end
+
+	local function Start()
+		listening = true
+		btn:SetScript("OnKeyDown", OnKeyDown)
+		btn:EnableKeyboard(true)
+		Snap()
+	end
+
+	function Stop()
+		listening = false
+		btn:SetScript("OnKeyDown", nil)
+		btn:EnableKeyboard(false)
+		Snap()
+	end
+
+	btn:SetScript("OnClick", function(_, mouse)
+		if InCombatLockdown() then return end
+		if mouse == "RightButton" then
+			setValue(nil)
+			Stop()
+			return
+		end
+		if listening then Stop() else Start() end
 	end)
+
 	btn:SetScript("OnHide", Stop)
 
 	AttachTooltip(f, tooltip)

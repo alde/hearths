@@ -1,4 +1,4 @@
--- Settings window, same layout as OffBeat: sidebar + scrolling content.
+-- Settings window: sidebar + scrolling content.
 -- Pages: General, Collection (LiteMount-style list with priorities and
 -- sources for missing hearthstones), Profiles.
 

@@ -1,4 +1,4 @@
--- Flat settings widgets (ported from OffBeat so the two addons look alike).
+-- Flat settings widgets.
 -- Every row builder takes (parent, ..., y) and returns (frame, height) so
 -- pages can be laid out top-down with `y = y - h`.
 

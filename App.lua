@@ -128,6 +128,7 @@ function App:RefreshAvailableHearthstones()
 
 	self.owned = owned
 	self.ownedCount = count
+	self:BuildSpellMap()
 	self.isScanning = false
 
 	Hearths:SendMessage("HEARTHS_DATA_UPDATED")
@@ -227,17 +228,75 @@ function App:IsCandidate(hearthstone)
 	return false
 end
 
-local function WeightedPick(list)
-	local total = 0
+---------------------------------------------------------------------------
+-- Usage tracking (bad-luck protection)
+---------------------------------------------------------------------------
+
+function App:GetUsage(id)
+	return Hearths.db.char.usage[id] or 0
+end
+
+function App:ResetUsage()
+	wipe(Hearths.db.char.usage)
+	Hearths:SendMessage("HEARTHS_PRIORITIES_CHANGED")
+end
+
+-- Map the teleport spell each hearthstone casts back to the hearthstone, so a
+-- successful cast (from our button OR the toy box) counts as a use.
+function App:BuildSpellMap()
+	local map = {}
+	local function add(id)
+		local _, spellId = C_Item.GetItemSpell(id)
+		if spellId then map[spellId] = id end
+	end
+	for id in pairs(self.owned) do add(id) end
+	add(HEARTHSTONE_IDS.DEFAULT)
+	map[HEARTHSTONE_IDS.ASTRAL_RECALL] = HEARTHSTONE_IDS.ASTRAL_RECALL
+	self.spellToStone = map
+end
+
+function App:OnSpellcastSucceeded(unit, spellId)
+	if unit ~= "player" or not spellId then return end
+	if issecretvalue and issecretvalue(spellId) then return end
+	if not self.spellToStone then self:BuildSpellMap() end
+	local id = self.spellToStone[spellId]
+	if not id then return end
+	local usage = Hearths.db.char.usage
+	usage[id] = (usage[id] or 0) + 1
+	Hearths.Debug:Log("App", "Usage", tostring(id) .. " used " .. usage[id] .. "x")
+	Hearths:SendMessage("HEARTHS_PRIORITIES_CHANGED")
+end
+
+-- Multiplier from bad-luck protection: (most + 1) / (uses + 1), capped.
+-- Everything used equally -> 1x for all, so it only ever evens things out.
+function App:GetLessUsedBoost(id, mostUsed)
+	if not Hearths.db.profile.favorLessUsed then return 1 end
+	local boost = (mostUsed + 1) / (self:GetUsage(id) + 1)
+	return math.min(Hearths.MAX_LESS_USED_BOOST, boost)
+end
+
+function App:GetWeight(stone, mostUsed)
+	local base = Hearths.PRIORITY_WEIGHTS[stone.priority] or 0
+	return base * self:GetLessUsedBoost(stone.id, mostUsed)
+end
+
+function App:WeightedPick(list)
+	local mostUsed = 0
 	for _, s in ipairs(list) do
-		total = total + (Hearths.PRIORITY_WEIGHTS[s.priority] or 0)
+		mostUsed = math.max(mostUsed, self:GetUsage(s.id))
+	end
+
+	local weights, total = {}, 0
+	for i, s in ipairs(list) do
+		weights[i] = self:GetWeight(s, mostUsed)
+		total = total + weights[i]
 	end
 	if total <= 0 then return list[math.random(1, #list)] end
 
 	local cutoff = math.random() * total
 	local t = 0
-	for _, s in ipairs(list) do
-		t = t + (Hearths.PRIORITY_WEIGHTS[s.priority] or 0)
+	for i, s in ipairs(list) do
+		t = t + weights[i]
 		if t > cutoff then return s end
 	end
 	return list[#list]
@@ -297,7 +356,7 @@ function App:RefreshSelectedHearthstone(manual)
 		return nil
 	end
 
-	local selected = WeightedPick(pool)
+	local selected = self:WeightedPick(pool)
 	Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", selected)
 	if manual then
 		Hearths:Print("Next up: |cffffffff" .. self:GetDisplayName(selected) .. "|r")

@@ -354,6 +354,17 @@ pageBuilders.general = function(parent, y)
 		function() return db.avoidRepeat end,
 		function(v) db.avoidRepeat = v end,
 		"Never roll the same hearthstone twice in a row (when you have more than one)."); y = y - h
+	_, h = W:Toggle(parent, "Favor Less-Used Hearthstones", y,
+		function() return db.favorLessUsed end,
+		function(v) db.favorLessUsed = v end,
+		"Bad-luck protection: hearthstones you've used less than your favourite get rolled more often (up to "
+			.. Hearths.MAX_LESS_USED_BOOST .. "x) until things even out. Priorities still apply on top."); y = y - h
+	_, h = W:ButtonRow(parent, "Usage History", y, {
+		{ "Reset", function()
+			App:ResetUsage()
+			Hearths:Print("Usage history cleared.")
+		end },
+	}, "Clear how many times this character has used each hearthstone."); y = y - h
 	_, h = W:Toggle(parent, "Use New Hearthstones Right Away", y,
 		function() return db.useNewImmediately end,
 		function(v) db.useNewImmediately = v end,
@@ -569,7 +580,9 @@ local function CreateCollectionRow(parent)
 				self.stepper.text:SetText(Hearths.PRIORITY_LABELS[p])
 				self.stepper.minus:SetShown(p > Hearths.PRIORITY_MIN)
 				self.stepper.plus:SetShown(p < Hearths.PRIORITY_MAX)
-				self.sub:SetText(entry and (catLabel .. "  -  " .. (entry.expansion or "")) or "Not in Hearths' catalogue yet (found by tooltip)")
+				local uses = Hearths.App:GetUsage(data.id)
+				local usedText = uses > 0 and ("  -  used " .. uses .. "x") or "  -  never used"
+				self.sub:SetText((entry and (catLabel .. "  -  " .. (entry.expansion or "")) or "Not in catalogue yet (found by tooltip)") .. usedText)
 				self.sub:SetTextColor(1, 1, 1, 0.45)
 			else
 				self.stepper:Hide()

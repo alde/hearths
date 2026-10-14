@@ -47,8 +47,31 @@ function App:OnPlayerEnteringWorld(isInitialLogin, isReloadingUi)
 	end
 end
 
-function App:OnNewToyAdded()
+function App:OnNewToyAdded(itemId, isRetry)
 	self:RefreshAvailableHearthstones()
+
+	itemId = tonumber(itemId)
+	if not (itemId and Hearths.db.profile.useNewImmediately) then
+		return
+	end
+	-- Only for hearthstones we can actually use and haven't set to Never
+	local info = self.owned[itemId]
+	if not info then
+		-- The toy box can lag the event by a moment; look again once
+		if not isRetry then
+			C_Timer.After(1, function() self:OnNewToyAdded(itemId, true) end)
+		end
+		return
+	end
+	if not self:MeetsRestrictions(itemId) then
+		return
+	end
+	if Hearths:GetPriority(itemId) <= Hearths.PRIORITY.NEVER then
+		return
+	end
+
+	Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", { id = itemId, kind = "toy" })
+	Hearths:Print("New hearthstone! |cffffffff" .. (info.name or itemId) .. "|r is on your Hearths button.")
 end
 
 function App:LoadCurrentHearthstone()
@@ -105,6 +128,7 @@ function App:RefreshAvailableHearthstones()
 
 	self.owned = owned
 	self.ownedCount = count
+	self:BuildSpellMap()
 	self.isScanning = false
 
 	Hearths:SendMessage("HEARTHS_DATA_UPDATED")
@@ -204,23 +228,82 @@ function App:IsCandidate(hearthstone)
 	return false
 end
 
-local function WeightedPick(list)
-	local total = 0
+---------------------------------------------------------------------------
+-- Usage tracking (bad-luck protection)
+---------------------------------------------------------------------------
+
+function App:GetUsage(id)
+	return Hearths.db.char.usage[id] or 0
+end
+
+function App:ResetUsage()
+	wipe(Hearths.db.char.usage)
+	Hearths:SendMessage("HEARTHS_PRIORITIES_CHANGED")
+end
+
+-- Map the teleport spell each hearthstone casts back to the hearthstone, so a
+-- successful cast (from our button OR the toy box) counts as a use.
+function App:BuildSpellMap()
+	local map = {}
+	local function add(id)
+		local _, spellId = C_Item.GetItemSpell(id)
+		if spellId then map[spellId] = id end
+	end
+	for id in pairs(self.owned) do add(id) end
+	add(HEARTHSTONE_IDS.DEFAULT)
+	map[HEARTHSTONE_IDS.ASTRAL_RECALL] = HEARTHSTONE_IDS.ASTRAL_RECALL
+	self.spellToStone = map
+end
+
+function App:OnSpellcastSucceeded(unit, spellId)
+	if unit ~= "player" or not spellId then return end
+	if issecretvalue and issecretvalue(spellId) then return end
+	if not self.spellToStone then self:BuildSpellMap() end
+	local id = self.spellToStone[spellId]
+	if not id then return end
+	local usage = Hearths.db.char.usage
+	usage[id] = (usage[id] or 0) + 1
+	Hearths.Debug:Log("App", "Usage", tostring(id) .. " used " .. usage[id] .. "x")
+	Hearths:SendMessage("HEARTHS_PRIORITIES_CHANGED")
+end
+
+-- Multiplier from bad-luck protection: (most + 1) / (uses + 1), capped.
+-- Everything used equally -> 1x for all, so it only ever evens things out.
+function App:GetLessUsedBoost(id, mostUsed)
+	if not Hearths.db.profile.favorLessUsed then return 1 end
+	local boost = (mostUsed + 1) / (self:GetUsage(id) + 1)
+	return math.min(Hearths.MAX_LESS_USED_BOOST, boost)
+end
+
+function App:GetWeight(stone, mostUsed)
+	local base = Hearths.PRIORITY_WEIGHTS[stone.priority] or 0
+	return base * self:GetLessUsedBoost(stone.id, mostUsed)
+end
+
+function App:WeightedPick(list)
+	local mostUsed = 0
 	for _, s in ipairs(list) do
-		total = total + (Hearths.PRIORITY_WEIGHTS[s.priority] or 0)
+		mostUsed = math.max(mostUsed, self:GetUsage(s.id))
+	end
+
+	local weights, total = {}, 0
+	for i, s in ipairs(list) do
+		weights[i] = self:GetWeight(s, mostUsed)
+		total = total + weights[i]
 	end
 	if total <= 0 then return list[math.random(1, #list)] end
 
 	local cutoff = math.random() * total
 	local t = 0
-	for _, s in ipairs(list) do
-		t = t + (Hearths.PRIORITY_WEIGHTS[s.priority] or 0)
+	for i, s in ipairs(list) do
+		t = t + weights[i]
 		if t > cutoff then return s end
 	end
 	return list[#list]
 end
 
-function App:RefreshSelectedHearthstone()
+-- manual = true when the player asked for it (Re-roll button), so we say what happened
+function App:RefreshSelectedHearthstone(manual)
 	local candidates = self:GetEnabledHearthstones()
 	Hearths.Debug:Log("App", "Candidates", "Number of enabled hearthstones: " .. tostring(#candidates))
 
@@ -251,15 +334,45 @@ function App:RefreshSelectedHearthstone()
 		end
 	end
 
-	if #offCooldown == 0 then
-		Hearths.Debug:Log("App", "Selection", "No hearthstones available or all on cooldown")
-		Hearths:SendMessage("HEARTHS_SELECTION_FAILED", "No hearthstones available or all on cooldown")
+	-- Hearthstone toys share one cooldown, so right after hearthing they're
+	-- ALL on cooldown. Keep rotating anyway instead of freezing the macro.
+	local pool = offCooldown
+	if #pool == 0 then
+		pool = {}
+		local current = Hearths.db.profile.avoidRepeat and #candidates > 1 and Hearths.UI:GetCurrentHearthstone()
+		for _, s in ipairs(candidates) do
+			if not (current and s.id == current.id) then
+				pool[#pool + 1] = s
+			end
+		end
+	end
+
+	if #pool == 0 then
+		Hearths.Debug:Log("App", "Selection", "No hearthstones enabled")
+		Hearths:SendMessage("HEARTHS_SELECTION_FAILED", "No hearthstones enabled - check the Collection page")
+		if manual then
+			Hearths:Print("Nothing to roll - every hearthstone is set to Never (see /hearths collection).")
+		end
 		return nil
 	end
 
-	local selected = WeightedPick(offCooldown)
+	local selected = self:WeightedPick(pool)
 	Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", selected)
+	if manual then
+		Hearths:Print("Next up: |cffffffff" .. self:GetDisplayName(selected) .. "|r")
+	end
 	return selected
+end
+
+function App:GetDisplayName(stone)
+	if stone.kind == "spell" then
+		return C_Spell.GetSpellName(stone.id) or "Astral Recall"
+	elseif stone.kind == "toy" then
+		local _, name = C_ToyBox.GetToyInfo(stone.id)
+		if name then return name end
+	end
+	local entry = Hearths.Data:Get(stone.id)
+	return C_Item.GetItemNameByID(stone.id) or (entry and entry.name) or tostring(stone.id)
 end
 
 ---------------------------------------------------------------------------

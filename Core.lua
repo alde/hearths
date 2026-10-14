@@ -50,8 +50,11 @@ function Hearths:OnEnable()
 	self:RegisterEvent("PLAYER_REGEN_ENABLED", function()
 		self.UI:OnCombatEnd()
 	end)
-	self:RegisterEvent("NEW_TOY_ADDED", function()
-		self.App:OnNewToyAdded()
+	self:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED", function(_, unit, _, spellId)
+		self.App:OnSpellcastSucceeded(unit, spellId)
+	end)
+	self:RegisterEvent("NEW_TOY_ADDED", function(_, itemId)
+		self.App:OnNewToyAdded(itemId)
 	end)
 	-- Covenant swaps change which covenant hearthstones are usable
 	self:RegisterEvent("COVENANT_CHOSEN", function()
@@ -76,9 +79,9 @@ function Hearths:SlashCommand(input)
 		self.Settings:OpenCollection("missing")
 	elseif command == "list" then
 		self:PrintHearthstoneList()
-	elseif command == "refresh" then
+	elseif command == "refresh" or command == "reroll" then
 		self.App:RefreshAvailableHearthstones()
-		self.App:RefreshSelectedHearthstone()
+		self.App:RefreshSelectedHearthstone(true)
 	elseif command == "debug" then
 		local debugCmd = args[2] or ""
 		if debugCmd == "on" or debugCmd == "enable" then
@@ -107,7 +110,7 @@ function Hearths:PrintHearthstoneList()
 		else
 			name = C_Item.GetItemNameByID(stone.id) or tostring(stone.id)
 		end
-		self:Print(string.format("  %s  |cff999999(%s)|r", name, self.PRIORITY_LABELS[stone.priority] or "?"))
+		self:Print(string.format("  %s  |cff999999(%s, used %dx)|r", name, self.PRIORITY_LABELS[stone.priority] or "?", self.App:GetUsage(stone.id)))
 	end
 end
 

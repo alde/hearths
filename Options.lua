@@ -39,10 +39,19 @@ Hearths.defaults = {
 		includeDefaultHearthstone = false,
 		includeAstralRecall = false,
 		avoidRepeat = true,
+		useNewImmediately = true, -- put a freshly learned hearthstone on the button right away
+		favorLessUsed = true,     -- bad-luck protection: boost hearthstones you've used less
 		hearthsKeybinding = nil,
 		debugMode = false,
 	},
+	char = {
+		usage = {},              -- [id] = times this character has hearthed with it
+	},
 }
+
+-- Bad-luck protection: a hearthstone used less than your most-used one gets
+-- its weight multiplied by up to this much (never-used ones get the most).
+Hearths.MAX_LESS_USED_BOOST = 4
 
 function Hearths:GetPriority(toyId)
 	local p = self.db.profile.priorities[toyId]

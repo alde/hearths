@@ -1,174 +1,95 @@
+-- Saved settings, LiteMount-style priorities and migration from the old
+-- on/off toggles.
+
+Hearths.DB_VERSION = 2
+
+-- Priorities work like LiteMount's:
+--   0 Never, 1 Normal, 2 More often, 3 A lot more often, 4 Always.
+-- If any usable hearthstone is set to Always, only "Always" ones are rolled.
+Hearths.PRIORITY = {
+	NEVER = 0,
+	NORMAL = 1,
+	MORE = 2,
+	MOST = 3,
+	ALWAYS = 4,
+}
+Hearths.PRIORITY_MIN = 0
+Hearths.PRIORITY_MAX = 4
+Hearths.PRIORITY_WEIGHTS = { [1] = 1, [2] = 2, [3] = 6, [4] = 1 }
+Hearths.PRIORITY_LABELS = {
+	[0] = "Never",
+	[1] = "Normal",
+	[2] = "More often",
+	[3] = "A lot more",
+	[4] = "Always",
+}
+Hearths.PRIORITY_COLORS = {
+	[0] = { 0.55, 0.55, 0.55 },
+	[1] = { 0.35, 0.70, 1.00 },
+	[2] = { 0.30, 0.85, 0.45 },
+	[3] = { 1.00, 0.75, 0.20 },
+	[4] = { 1.00, 0.45, 0.85 },
+}
+
 Hearths.defaults = {
 	profile = {
-		useAllHearthstoneToys = true,
+		dbVersion = 0,
+		priorities = {},         -- [toyId] = 0..4
+		defaultPriority = 1,     -- priority for hearthstones you haven't touched
 		includeDefaultHearthstone = false,
 		includeAstralRecall = false,
-		enabledHearthstones = {},
-		availableHearthstones = {},
+		avoidRepeat = true,
+		hearthsKeybinding = nil,
 		debugMode = false,
 	},
 }
 
--- Convert hearthstone scan data to AceConfig options table format
-function Hearths:ConvertHearthstonesToOptions(hearthstoneToys)
-	local settings = {}
-	for i, toy in pairs(hearthstoneToys) do
-		settings[tostring(toy.id)] = {
-			type = "toggle",
-			order = i + 1,
-			name = toy.name,
-			image = toy.icon,
-		}
+function Hearths:GetPriority(toyId)
+	local p = self.db.profile.priorities[toyId]
+	if p == nil then
+		p = self.db.profile.defaultPriority
 	end
-	return settings
+	return p
 end
 
-Hearths.options = {
-	type = "group",
-	name = "Hearths - Hearthstone Randomizer",
-	handler = Hearths,
-	get = "GetValue",
-	set = "SetValue",
-	args = {
-		macro = {
-			type = "group",
-			name = "Macro",
-			order = 1,
-			inline = true,
-			args = {
-				pickupMacro = {
-					type = "execute",
-					order = 1,
-					name = function()
-						if GetCursorInfo() then
-							return "Cancel Pickup"
-						end
-						return "Pick Up Macro"
-					end,
-					desc = "Click to pick up the HEARTHS macro, then place it on your action bars. Click again to cancel.",
-					func = function()
-						if GetCursorInfo() then
-							ClearCursor()
-							return
-						end
-						local macroIndex = GetMacroIndexByName("HEARTHS_BTN")
-						if macroIndex > 0 then
-							PickupMacro(macroIndex)
-						else
-							Hearths:Print("No macro available yet. Try /hearths refresh first.")
-						end
-					end,
-				},
-				refreshMacro = {
-					type = "execute",
-					order = 2,
-					name = "Refresh",
-					desc = "Re-roll the random hearthstone selection",
-					func = function()
-						Hearths.App:RefreshSelectedHearthstone()
-					end,
-				},
-			},
-		},
-		settings = {
-			type = "group",
-			name = "Settings",
-			order = 5,
-			inline = true,
-			args = {
-				debugMode = {
-					type = "toggle",
-					order = 1,
-					name = "Debug Mode",
-					desc = "Enable or Disable debug output",
-				},
-				hearthsKeybinding = {
-					type = "keybinding",
-					order = 2,
-					name = "keybind",
-					desc = "Random Hearthstone Keybind. Shift for Dalaran, Ctrl for Garrison.",
-				},
-			},
-		},
-		stones = {
-			type = "group",
-			name = "Stones",
-			order = 10,
-			inline = true,
-			args = {
-				useAllHearthstoneToys = {
-					type = "toggle",
-					order = 2,
-					name = "Use All Hearthstone Toys",
-					desc = function()
-						local count = 0
-						for _ in pairs(Hearths.db.profile.availableHearthstones) do count = count + 1 end
-						return "Automatically include all Hearthstone toys in the randomizer (" .. count .. " found)"
-					end,
-				},
-				includeDefaultHearthstone = {
-					type = "toggle",
-					order = 3,
-					name = "Include Default Hearthstone",
-					desc = function()
-						if Hearths.App:IsDefaultHearthstoneAvailable() then
-							return "Include default Hearthstone in the randomizer"
-						else
-							return "No default hearthstone available"
-						end
-					end,
-					disabled = function()
-						local unavailable = not Hearths.App:IsDefaultHearthstoneAvailable()
-						Hearths.options.args.stones.args.includeDefaultHearthstone.descStyle = unavailable and "inline" or "tooltip"
-						return unavailable
-					end,
-				},
-				includeAstralRecall = {
-					type = "toggle",
-					order = 4,
-					name = "Include Astral Recall",
-					desc = function()
-						if Hearths.App:IsPlayerShaman() then
-							return "Include Astral Recall in the randomizer"
-						else
-							return "Only available for shamans"
-						end
-					end,
-					disabled = function()
-						local unavailable = not Hearths.App:IsPlayerShaman()
-						Hearths.options.args.stones.args.includeAstralRecall.descStyle = unavailable and "inline" or "tooltip"
-						return unavailable
-					end,
-				},
-			},
-		},
-		selectedHearthstones = {
-			type = "group",
-			order = 20,
-			name = "Available Hearthstones",
-			disabled = function() return Hearths.db.profile.useAllHearthstoneToys end,
-			set = function(info, value)
-				Hearths.db.profile.enabledHearthstones[info[#info]] = value
-			end,
-			get = function(info) return Hearths.db.profile.enabledHearthstones[info[#info]] end,
-			args = {},
-		},
-	},
-}
-
-function Hearths:GetValue(info)
-	return self.db.profile[info[#info]]
+function Hearths:SetPriority(toyId, value)
+	value = math.max(self.PRIORITY_MIN, math.min(self.PRIORITY_MAX, value))
+	self.db.profile.priorities[toyId] = value
+	self:SendMessage("HEARTHS_PRIORITIES_CHANGED")
 end
 
-function Hearths:SetValue(info, value)
-	local settingKey = info[#info]
-	local previousValue = self.db.profile[settingKey]
+function Hearths:SetAllPriorities(ids, value)
+	for _, id in ipairs(ids) do
+		self.db.profile.priorities[id] = value
+	end
+	self:SendMessage("HEARTHS_PRIORITIES_CHANGED")
+end
 
-	self.db.profile[settingKey] = value
-
-	if settingKey == "hearthsKeybinding" then
-		self.UI:UpdateKeybinding(previousValue, value)
+-- v1 stored `useAllHearthstoneToys` + `enabledHearthstones` (string keys).
+-- When "use all" was off, carry the hand-picked set over as Normal/Never.
+function Hearths:MigrateProfile()
+	local p = self.db.profile
+	if (p.dbVersion or 0) >= self.DB_VERSION then
+		return
 	end
 
-	self.Debug:Log("Setting changed:", settingKey, tostring(value))
+	if p.useAllHearthstoneToys == false and type(p.enabledHearthstones) == "table" then
+		if type(p.availableHearthstones) == "table" then
+			for key in pairs(p.availableHearthstones) do
+				local id = tonumber(key)
+				if id then p.priorities[id] = self.PRIORITY.NEVER end
+			end
+		end
+		for key, enabled in pairs(p.enabledHearthstones) do
+			local id = tonumber(key)
+			if id then
+				p.priorities[id] = enabled and self.PRIORITY.NORMAL or self.PRIORITY.NEVER
+			end
+		end
+	end
+
+	p.useAllHearthstoneToys = nil
+	p.enabledHearthstones = nil
+	p.availableHearthstones = nil
+	p.dbVersion = self.DB_VERSION
 end

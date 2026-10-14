@@ -14,21 +14,19 @@ local FAKE_HEARTHSTONE_IDS = {
 	[95568] = true, -- Sunreaver Beacon
 }
 
--- Toys restricted to specific races (race file tokens)
-local RACE_RESTRICTED_TOYS = {
-	[210455] = { ["Draenei"] = true, ["LightforgedDraenei"] = true }, -- Draenic Hologem
-}
-
+local HEARTHSTONE_TOOLTIP_TEXT = "Speak to an Innkeeper in a different place to change your home location."
 local LOGIN_LOAD_DELAY_SECONDS = 3
 
 function App:Initialize()
 	self.scanningTooltip = nil
 	self.isScanning = false
+	self.owned = {}      -- [toyId] = { id, name, icon, known = catalogue entry or nil }
+	self.ownedCount = 0
 end
 
 function App:OnPlayerEnteringWorld(isInitialLogin, isReloadingUi)
 	if not self.scanningTooltip then
-		-- Initialize hidden scanning tooltip for item description parsing
+		-- Hidden tooltip used to spot hearthstone toys that aren't in the catalogue yet
 		self.scanningTooltip = CreateFrame("GameTooltip", "HearthsScanningTooltip", UIParent, "GameTooltipTemplate")
 		self.scanningTooltip:SetOwner(UIParent, "ANCHOR_NONE")
 	end
@@ -38,6 +36,7 @@ function App:OnPlayerEnteringWorld(isInitialLogin, isReloadingUi)
 		-- briefly and just restore whatever the macro already has instead
 		-- of rerolling.
 		C_Timer.After(LOGIN_LOAD_DELAY_SECONDS, function()
+			self:RefreshAvailableHearthstones()
 			self:LoadCurrentHearthstone()
 		end)
 	else
@@ -54,169 +53,219 @@ end
 
 function App:LoadCurrentHearthstone()
 	local currentHearthstone = Hearths.UI:GetCurrentHearthstone()
-	if currentHearthstone then
+	if currentHearthstone and self:IsCandidate(currentHearthstone) then
 		Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", currentHearthstone)
 		return
 	end
 
-	self:RefreshAvailableHearthstones()
 	self:RefreshSelectedHearthstone()
 end
+
+---------------------------------------------------------------------------
+-- Collection scanning
+---------------------------------------------------------------------------
 
 function App:RefreshAvailableHearthstones()
 	if self.isScanning then
 		Hearths.Debug:Log("App", "Scanning", "Already scanning, skipping duplicate request")
 		return
 	end
-
 	self.isScanning = true
-	local availableHearthstones = Hearths:ConvertHearthstonesToOptions(self:GetAvailableHearthstones())
 
-	Hearths.db.profile.availableHearthstones = availableHearthstones
-	Hearths.options.args.selectedHearthstones.args = availableHearthstones
+	local owned = {}
+	local count = 0
 
-	Hearths:SendMessage("HEARTHS_DATA_UPDATED", availableHearthstones)
+	-- 1) Everything we know about: cheap PlayerHasToy checks
+	for _, entry in ipairs(Hearths.Data.HEARTHSTONES) do
+		if PlayerHasToy(entry.id) then
+			local _, toyName, icon = C_ToyBox.GetToyInfo(entry.id)
+			owned[entry.id] = { id = entry.id, name = toyName or entry.name, icon = icon, known = entry }
+			count = count + 1
+		end
+	end
 
+	-- 2) Anything else in the toy box whose tooltip reads like a hearthstone
+	--    (new toys that aren't in Data.lua yet)
+	local numToys = C_ToyBox.GetNumToys()
+	for i = 1, numToys do
+		local toyId = C_ToyBox.GetToyFromIndex(i)
+		if toyId and toyId > 0 and not owned[toyId] and not Hearths.Data:Get(toyId)
+			and not FAKE_HEARTHSTONE_IDS[toyId]
+			and toyId ~= HEARTHSTONE_IDS.DALARAN and toyId ~= HEARTHSTONE_IDS.GARRISON
+			and PlayerHasToy(toyId) then
+			local description = self:GetItemDescription(toyId)
+			if string.find(description, HEARTHSTONE_TOOLTIP_TEXT, 1, true) then
+				local _, toyName, icon = C_ToyBox.GetToyInfo(toyId)
+				owned[toyId] = { id = toyId, name = toyName or ("Toy " .. toyId), icon = icon }
+				count = count + 1
+				Hearths.Debug:Log("App", "Detection", "Uncatalogued hearthstone: " .. tostring(toyName) .. " (" .. toyId .. ")")
+			end
+		end
+	end
+
+	self.owned = owned
+	self.ownedCount = count
 	self.isScanning = false
-	Hearths.Debug:Log("App", "Hearthstones", "Refreshed available hearthstones")
+
+	Hearths:SendMessage("HEARTHS_DATA_UPDATED")
+	Hearths.Debug:Log("App", "Hearthstones", "Found " .. count .. " hearthstone toys")
+end
+
+-- Full collection for the Collection page: catalogue + uncatalogued owned toys.
+-- Each row: { id, name, icon, owned, usable, reason, priority, entry }
+function App:GetCollection()
+	local rows = {}
+
+	for _, entry in ipairs(Hearths.Data.HEARTHSTONES) do
+		local ownedInfo = self.owned[entry.id]
+		local usable, reason = self:MeetsRestrictions(entry.id)
+		rows[#rows + 1] = {
+			id = entry.id,
+			name = (ownedInfo and ownedInfo.name) or C_Item.GetItemNameByID(entry.id) or entry.name,
+			icon = (ownedInfo and ownedInfo.icon) or C_Item.GetItemIconByID(entry.id),
+			owned = ownedInfo ~= nil,
+			usable = usable,
+			reason = reason,
+			priority = Hearths:GetPriority(entry.id),
+			entry = entry,
+		}
+	end
+
+	for id, info in pairs(self.owned) do
+		if not info.known then
+			rows[#rows + 1] = {
+				id = id,
+				name = info.name,
+				icon = info.icon,
+				owned = true,
+				usable = true,
+				priority = Hearths:GetPriority(id),
+			}
+		end
+	end
+
+	return rows
+end
+
+function App:GetCollectionCounts()
+	return self.ownedCount, #Hearths.Data.HEARTHSTONES + (self.ownedCount - self:CountKnownOwned())
+end
+
+function App:CountKnownOwned()
+	local n = 0
+	for _, info in pairs(self.owned) do
+		if info.known then n = n + 1 end
+	end
+	return n
+end
+
+---------------------------------------------------------------------------
+-- Selection
+---------------------------------------------------------------------------
+
+-- Weighted candidate list (toys with priority > 0 that we can use), plus
+-- the default Hearthstone item if enabled.
+function App:GetEnabledHearthstones()
+	local stones = {}
+	local anyAlways = false
+
+	for id in pairs(self.owned) do
+		local p = Hearths:GetPriority(id)
+		if p > Hearths.PRIORITY.NEVER and self:MeetsRestrictions(id) then
+			stones[#stones + 1] = { id = id, kind = "toy", priority = p }
+			if p == Hearths.PRIORITY.ALWAYS then anyAlways = true end
+		end
+	end
+
+	if Hearths.db.profile.includeDefaultHearthstone and self:IsDefaultHearthstoneAvailable() then
+		stones[#stones + 1] = { id = HEARTHSTONE_IDS.DEFAULT, kind = "item", priority = Hearths.PRIORITY.NORMAL }
+	end
+
+	-- "Always" wins: only roll among the Always hearthstones
+	if anyAlways then
+		local always = {}
+		for _, s in ipairs(stones) do
+			if s.priority == Hearths.PRIORITY.ALWAYS then always[#always + 1] = s end
+		end
+		stones = always
+	end
+
+	table.sort(stones, function(a, b) return a.id < b.id end)
+	return stones
+end
+
+function App:IsCandidate(hearthstone)
+	if hearthstone.kind == "spell" then
+		return self:IsPlayerShaman() and Hearths.db.profile.includeAstralRecall
+	end
+	for _, s in ipairs(self:GetEnabledHearthstones()) do
+		if s.id == hearthstone.id then return true end
+	end
+	return false
+end
+
+local function WeightedPick(list)
+	local total = 0
+	for _, s in ipairs(list) do
+		total = total + (Hearths.PRIORITY_WEIGHTS[s.priority] or 0)
+	end
+	if total <= 0 then return list[math.random(1, #list)] end
+
+	local cutoff = math.random() * total
+	local t = 0
+	for _, s in ipairs(list) do
+		t = t + (Hearths.PRIORITY_WEIGHTS[s.priority] or 0)
+		if t > cutoff then return s end
+	end
+	return list[#list]
 end
 
 function App:RefreshSelectedHearthstone()
 	local candidates = self:GetEnabledHearthstones()
-	Hearths.Debug:Log("App", "Candidates", "Number of enabled hearthstones: ".. tostring(#candidates))
-	local availableCandidates = {}
+	Hearths.Debug:Log("App", "Candidates", "Number of enabled hearthstones: " .. tostring(#candidates))
 
-	for _, hearthstone in pairs(candidates) do
+	local offCooldown = {}
+	for _, hearthstone in ipairs(candidates) do
 		if not self:IsOnCooldown(hearthstone.id, hearthstone.kind) then
-			table.insert(availableCandidates, hearthstone)
+			offCooldown[#offCooldown + 1] = hearthstone
+		end
+	end
+
+	-- Don't show the same one twice in a row if there's a choice
+	if Hearths.db.profile.avoidRepeat and #offCooldown > 1 then
+		local current = Hearths.UI:GetCurrentHearthstone()
+		if current then
+			for i, s in ipairs(offCooldown) do
+				if s.id == current.id then
+					table.remove(offCooldown, i)
+					break
+				end
+			end
 		end
 	end
 
 	-- Shaman: use Astral Recall if everything else is on cooldown
-	if #availableCandidates == 0 and self:IsPlayerShaman() and Hearths.db.profile.includeAstralRecall then
-		local astralRecall = { id = HEARTHSTONE_IDS.ASTRAL_RECALL, kind = "spell" }
-		if not self:IsOnCooldown(astralRecall.id, astralRecall.kind) then
-			table.insert(availableCandidates, astralRecall)
+	if #offCooldown == 0 and self:IsPlayerShaman() and Hearths.db.profile.includeAstralRecall then
+		if not self:IsOnCooldown(HEARTHSTONE_IDS.ASTRAL_RECALL, "spell") then
+			offCooldown[1] = { id = HEARTHSTONE_IDS.ASTRAL_RECALL, kind = "spell" }
 		end
 	end
 
-	if #availableCandidates == 0 then
+	if #offCooldown == 0 then
 		Hearths.Debug:Log("App", "Selection", "No hearthstones available or all on cooldown")
 		Hearths:SendMessage("HEARTHS_SELECTION_FAILED", "No hearthstones available or all on cooldown")
 		return nil
 	end
 
-	-- Select random hearthstone from available candidates
-	local randomIndex = math.random(1, #availableCandidates)
-	local selectedHearthstone = availableCandidates[randomIndex]
-
-	-- Apply Shaman special case
-	selectedHearthstone = self:ApplyShamanCooldownLogic(selectedHearthstone)
-
-	-- Notify UI layer of selection change
-	Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", selectedHearthstone)
-	return selectedHearthstone
+	local selected = WeightedPick(offCooldown)
+	Hearths:SendMessage("HEARTHS_SELECTION_CHANGED", selected)
+	return selected
 end
 
--- Shaman special case
-function App:ApplyShamanCooldownLogic(hearthstone)
-	if not self:IsPlayerShaman() or not Hearths.db.profile.includeAstralRecall then
-		return hearthstone
-	end
+---------------------------------------------------------------------------
+-- Helpers
+---------------------------------------------------------------------------
 
-	-- If selected hearthstone is on cooldown but Astral Recall isn't, switch to Astral Recall
-	if hearthstone.kind ~= "spell" and self:IsOnCooldown(hearthstone.id, hearthstone.kind) then
-		if not self:IsOnCooldown(HEARTHSTONE_IDS.ASTRAL_RECALL, "spell") then
-			Hearths.Debug:Log("App", "Cooldown", "Switching to Astral Recall due to cooldown")
-			return { id = HEARTHSTONE_IDS.ASTRAL_RECALL, kind = "spell" }
-		end
-	end
-
-	return hearthstone
-end
-
--- Get list of enabled hearthstones
-function App:GetEnabledHearthstones()
-	local stones = {}
-
-	-- Get toy hearthstones
-	local candidates = Hearths.db.profile.enabledHearthstones
-	if Hearths.db.profile.useAllHearthstoneToys then
-		candidates = Hearths.db.profile.availableHearthstones
-	end
-
-	-- Add enabled toy hearthstones
-	for toyId, enabled in pairs(candidates) do
-		if enabled then
-			table.insert(stones, { id = tonumber(toyId), kind = "toy" })
-		end
-	end
-
-	-- Add default hearthstone if available and enabled
-	if Hearths.db.profile.includeDefaultHearthstone and self:IsDefaultHearthstoneAvailable() then
-		table.insert(stones, { id = HEARTHSTONE_IDS.DEFAULT, kind = "item" })
-	end
-
-	-- Add Astral Recall if player is a Shaman and enabled
-	if Hearths.db.profile.includeAstralRecall and self:IsPlayerShaman() then
-		table.insert(stones, { id = HEARTHSTONE_IDS.ASTRAL_RECALL, kind = "spell" })
-	end
-
-	return stones
-end
-
--- Scan toy box for all available hearthstone toys
-function App:GetAvailableHearthstones()
-	local hearthstoneToys = {}
-
-	local numToys = C_ToyBox.GetNumToys()
-	Hearths.Debug:Log("App", "ToyBox", "Scanning " .. numToys .. " toys in toy box...")
-
-	for i = 1, numToys do
-		local toyId = C_ToyBox.GetToyFromIndex(i)
-		if self:ShouldIncludeToy(toyId) then
-			local _, toyName, icon = C_ToyBox.GetToyInfo(toyId)
-
-			-- Get item description by scanning the tooltip
-			local description = self:GetItemDescription(toyId)
-			local hasHearthstoneDescription = string.match(description, "Speak to an Innkeeper in a different place to change your home location.")
-			if hasHearthstoneDescription then
-				local hearthstoneToy = {
-					id = toyId,
-					name = toyName,
-					icon = icon,
-					type = "toy",
-				}
-				table.insert(hearthstoneToys, hearthstoneToy)
-				Hearths.Debug:Log("App", "Detection", "Added to candidates: " .. hearthstoneToy.name)
-			end
-		end
-	end
-
-	Hearths.Debug:Log("App", "Detection", "Found " .. #hearthstoneToys .. " usable hearthstone toys")
-	return hearthstoneToys
-end
-
--- Determine if a toy should be included in hearthstone selection
-function App:ShouldIncludeToy(toyID)
-	if not toyID or toyID == 0 then
-		return false
-	elseif toyID == HEARTHSTONE_IDS.DALARAN then
-		return false -- Not part of randomizer
-	elseif toyID == HEARTHSTONE_IDS.GARRISON then
-		return false -- Not part of randomizer
-	elseif FAKE_HEARTHSTONE_IDS[toyID] then
-		return false
-	elseif not PlayerHasToy(toyID) then
-		return false
-	elseif not self:MeetsRaceRestriction(toyID) then
-		return false
-	end
-
-	return true
-end
-
--- Extract item description
 function App:GetItemDescription(itemId)
 	if not self.scanningTooltip then
 		return ""
@@ -225,53 +274,60 @@ function App:GetItemDescription(itemId)
 	self.scanningTooltip:ClearLines()
 	self.scanningTooltip:SetHyperlink("item:" .. itemId)
 
-	local descriptionText = ""
-	local numLines = self.scanningTooltip:NumLines()
-
-	for i = 1, numLines do
+	local parts = {}
+	for i = 2, self.scanningTooltip:NumLines() do
 		local line = _G["HearthsScanningTooltipTextLeft" .. i]
-		if line and line:GetText() then
-			local text = line:GetText()
-			-- Skip first line (name) and just get the description
-			if i > 1 then
-				descriptionText = descriptionText .. text .. " "
-			end
-		end
+		local text = line and line:GetText()
+		if text then parts[#parts + 1] = text end
 	end
 
 	self.scanningTooltip:ClearLines()
-	return descriptionText
+	return table.concat(parts, " ")
 end
 
--- Check if an item or spell is on cooldown
 function App:IsOnCooldown(id, kind)
-	local duration = 0
+	local duration
 	if kind == "spell" then
-		_, duration = C_Spell.GetSpellCooldown(id)
+		local info = C_Spell.GetSpellCooldown(id)
+		duration = type(info) == "table" and info.duration or info
 	else
+		local _
 		_, duration = C_Item.GetItemCooldown(id)
 	end
-	if not duration then
+	-- Midnight can hand back secret values in restricted contexts; comparing
+	-- one would error, so treat it as "not on cooldown".
+	if issecretvalue and issecretvalue(duration) then
 		return false
 	end
-	if duration > 0 then
-		Hearths.Debug:Log("IsOnCooldown", id .. " (" .. kind .. ")", true)
-		return true
-	end
-	Hearths.Debug:Log("IsOnCooldown", id .. " (" .. kind .. ")", false)
-	return false
+	-- GCD shows up as a short cooldown; ignore anything under 2s
+	return (duration or 0) > 2
 end
 
-function App:MeetsRaceRestriction(toyID)
-	local allowedRaces = RACE_RESTRICTED_TOYS[toyID]
-	if not allowedRaces then
+-- Returns usable, reasonIfNot
+function App:MeetsRestrictions(toyId)
+	local entry = Hearths.Data:Get(toyId)
+	local restrict = entry and entry.restrict
+	if not restrict then
 		return true
 	end
-	local _, raceFile = UnitRace("player")
-	return allowedRaces[raceFile] == true
+
+	if restrict.race then
+		local _, raceFile = UnitRace("player")
+		if not restrict.race[raceFile] then
+			return false, "Wrong race for this character"
+		end
+	end
+
+	if restrict.covenant then
+		local active = C_Covenants and C_Covenants.GetActiveCovenantID and C_Covenants.GetActiveCovenantID() or 0
+		if active ~= restrict.covenant then
+			return false, "Needs this character pledged to the covenant"
+		end
+	end
+
+	return true
 end
 
--- Is the Player a Shaman
 function App:IsPlayerShaman()
 	local _, playerClass = UnitClass("player")
 	return playerClass == "SHAMAN"
@@ -282,7 +338,6 @@ function App:IsDefaultHearthstoneAvailable()
 	return C_Item.GetItemCount(HEARTHSTONE_IDS.DEFAULT, false, false, false, false) > 0
 end
 
--- Hearthstone constants accessor
 function App:GetHearthstoneIDs()
 	return HEARTHSTONE_IDS
 end

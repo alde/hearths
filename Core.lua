@@ -1,6 +1,4 @@
 Hearths = LibStub("AceAddon-3.0"):NewAddon("Hearths", "AceEvent-3.0", "AceConsole-3.0")
-local AC = LibStub("AceConfig-3.0")
-local ACD = LibStub("AceConfigDialog-3.0")
 
 function Hearths:OnInitialize()
 	-- Handle database migration from old version
@@ -12,21 +10,27 @@ function Hearths:OnInitialize()
 
 	-- Initialize database with defaults (defined in Options.lua)
 	self.db = LibStub("AceDB-3.0"):New("HearthsDB", self.defaults, true)
+	self:MigrateProfile()
+
+	local function OnProfileChanged()
+		self:MigrateProfile()
+		self.App:RefreshSelectedHearthstone()
+		self.Settings:OnProfileChanged()
+	end
+	self.db.RegisterCallback(self, "OnProfileChanged", OnProfileChanged)
+	self.db.RegisterCallback(self, "OnProfileCopied", OnProfileChanged)
+	self.db.RegisterCallback(self, "OnProfileReset", OnProfileChanged)
 
 	self.App:Initialize()
 	self.UI:Initialize()
 
-	AC:RegisterOptionsTable("Hearths_Options", self.options)
-	self.optionsFrame = ACD:AddToBlizOptions("Hearths_Options", "Hearths")
-
-	local profiles = LibStub("AceDBOptions-3.0"):GetOptionsTable(self.db)
-	AC:RegisterOptionsTable("Hearths_Profiles", profiles)
-	ACD:AddToBlizOptions("Hearths_Profiles", "Profiles", "Hearths")
-
 	-- Module Messages Handlers
-	self:RegisterMessage("HEARTHS_DATA_UPDATED", function(_, ...)
-		self.UI:OnDataUpdated("HEARTHS_DATA_UPDATED", ...)
-		ACD:ConfigTableChanged(nil, "Hearths_Options")
+	self:RegisterMessage("HEARTHS_DATA_UPDATED", function()
+		self.UI:OnDataUpdated()
+		self.Settings:Refresh()
+	end)
+	self:RegisterMessage("HEARTHS_PRIORITIES_CHANGED", function()
+		self.Settings:Refresh()
 	end)
 	self:RegisterMessage("HEARTHS_SELECTION_CHANGED", function(_, ...)
 		self.UI:OnSelectionChanged("HEARTHS_SELECTION_CHANGED", ...)
@@ -35,7 +39,6 @@ function Hearths:OnInitialize()
 		self.UI:OnSelectionFailed("HEARTHS_SELECTION_FAILED", ...)
 	end)
 
-	-- Register slash command
 	self:RegisterChatCommand("hearths", "SlashCommand")
 end
 
@@ -50,25 +53,34 @@ function Hearths:OnEnable()
 	self:RegisterEvent("NEW_TOY_ADDED", function()
 		self.App:OnNewToyAdded()
 	end)
+	-- Covenant swaps change which covenant hearthstones are usable
+	self:RegisterEvent("COVENANT_CHOSEN", function()
+		self.App:RefreshSelectedHearthstone()
+		self.Settings:Refresh()
+	end)
 end
 
--- Slash command handler
 function Hearths:SlashCommand(input)
-	local args = { strsplit(" ", input:lower()) }
+	local args = { strsplit(" ", (input or ""):lower()) }
 	local command = args[1] or ""
 
-	if command == "" or command == "options" or command == "opts" then
+	if command == "" or command == "options" or command == "opts" or command == "config" then
 		self.App:RefreshAvailableHearthstones()
-		Settings.OpenToCategory(self.optionsFrame.name)
+		self.Settings:Toggle()
+	elseif command == "collection" or command == "c" then
+		self.App:RefreshAvailableHearthstones()
+		self.Settings:OpenCollection("all")
+	elseif command == "missing" or command == "m" then
+		self.App:RefreshAvailableHearthstones()
+		self:PrintMissing()
+		self.Settings:OpenCollection("missing")
 	elseif command == "list" then
 		self:PrintHearthstoneList()
 	elseif command == "refresh" then
 		self.App:RefreshAvailableHearthstones()
 		self.App:RefreshSelectedHearthstone()
 	elseif command == "debug" then
-		-- Handle debug subcommands
 		local debugCmd = args[2] or ""
-
 		if debugCmd == "on" or debugCmd == "enable" then
 			self.db.profile.debugMode = true
 			self:Print("Debug logging enabled")
@@ -83,49 +95,61 @@ function Hearths:SlashCommand(input)
 	end
 end
 
--- Print enabled hearthstones (for debugging)
+-- Print the current rotation with priorities
 function Hearths:PrintHearthstoneList()
-	local availCount = 0
-	for _ in pairs(self.db.profile.availableHearthstones) do availCount = availCount + 1 end
-	self:Print("|cFFFF8040[Hearths]|r Available in DB: " .. availCount .. ", Toys in box: " .. C_ToyBox.GetNumToys() .. ", Use all: " .. tostring(self.db.profile.useAllHearthstoneToys))
-
 	local stones = self.App:GetEnabledHearthstones()
-	self:Print("|cFFFF8040[Hearths - Enabled Hearthstones]|r (" .. #stones .. " total)")
+	self:Print(string.format("|cFFFF8040Rotation|r (%d of %d collected)", #stones, self.App.ownedCount))
 	for _, stone in ipairs(stones) do
 		local name
-		if stone.kind == "spell" then
-			name = C_Spell.GetSpellName(stone.id) or tostring(stone.id)
-		elseif stone.kind == "toy" then
+		if stone.kind == "toy" then
 			local _, toyName = C_ToyBox.GetToyInfo(stone.id)
 			name = toyName or tostring(stone.id)
 		else
 			name = C_Item.GetItemNameByID(stone.id) or tostring(stone.id)
 		end
-		self:Print("  " .. stone.kind .. ": " .. name .. " (" .. tostring(stone.id) .. ")")
+		self:Print(string.format("  %s  |cff999999(%s)|r", name, self.PRIORITY_LABELS[stone.priority] or "?"))
+	end
+end
+
+-- Print missing hearthstones you can still get, grouped
+function Hearths:PrintMissing()
+	local groups = { available = {}, seasonal = {}, shop = {} }
+	for _, data in ipairs(self.App:GetCollection()) do
+		if not data.owned and data.entry and groups[data.entry.status] then
+			table.insert(groups[data.entry.status], data)
+		end
+	end
+
+	local have, total = self.App:GetCollectionCounts()
+	self:Print(string.format("|cFFFF8040Collected %d / %d hearthstones|r", have, total))
+	for _, def in ipairs({ { "available", "Obtainable now" }, { "seasonal", "Seasonal" }, { "shop", "Shop" } }) do
+		local list = groups[def[1]]
+		if #list > 0 then
+			table.sort(list, function(a, b) return a.name < b.name end)
+			self:Print("|cff59b3ff" .. def[2] .. "|r")
+			for _, data in ipairs(list) do
+				self:Print("  |cffffffff" .. data.name .. "|r - " .. data.entry.source)
+			end
+		end
 	end
 end
 
 function Hearths:PrintHelp()
 	local help = {
 		"|cFFFF8040[Hearths Commands]|r",
-		"/hearths - Open settings panel",
-		"/hearths list - Show enabled hearthstones",
-		"/hearths refresh - Update macro selection",
-		"/hearths debug <cmd> - Debug commands (use 'debug help' for details)",
+		"/hearths - Open settings",
+		"/hearths collection - Browse all hearthstones and set priorities",
+		"/hearths missing - List hearthstones you're missing and how to get them",
+		"/hearths list - Show the current rotation",
+		"/hearths refresh - Rescan and re-roll",
+		"/hearths debug on|off - Toggle debug logging",
 	}
-
 	for _, line in ipairs(help) do
 		self:Print(line)
 	end
 end
 
 function Hearths:PrintDebugHelp()
-	local help = {
-		"|cFFFF8040[Hearths Debug Commands]|r",
-		"/hearths debug on|off - Enable/disable debug logging",
-	}
-
-	for _, line in ipairs(help) do
-		self:Print(line)
-	end
+	self:Print("|cFFFF8040[Hearths Debug Commands]|r")
+	self:Print("/hearths debug on|off - Enable/disable debug logging")
 end

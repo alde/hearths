@@ -1,8 +1,9 @@
-## Interface: 120100, 120007, 120005, 120001
+## Interface: 120105, 120100, 120007, 120005, 120001
 ## Title: Hearths
-## Version: 31
+## Version: 40
 ## Notes: Hearthstone Rotation
 ## Author: Rickard Dybeck
+## IconTexture: Interface\Icons\INV_Misc_Rune_01
 ## SavedVariablesPerCharacter: HearthsDB
 ## Category: Collections
 ## OptionalDeps: Ace3
@@ -12,13 +13,13 @@ Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
 Libs\AceAddon-3.0\AceAddon-3.0.xml
 Libs\AceEvent-3.0\AceEvent-3.0.xml
 Libs\AceDB-3.0\AceDB-3.0.xml
-Libs\AceDBOptions-3.0\AceDBOptions-3.0.xml
 Libs\AceConsole-3.0\AceConsole-3.0.xml
-Libs\AceGUI-3.0\AceGUI-3.0.xml
-Libs\AceConfig-3.0\AceConfig-3.0.xml
 
 Core.lua
 Debug.lua
+Data.lua
+Options.lua
 App.lua
 UI.lua
-Options.lua
+Widgets.lua
+Settings.lua

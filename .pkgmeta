@@ -35,3 +35,4 @@ license-output: LICENSE
 
 ignore:
   - download_deps.sh
+  - screenshot-*.png

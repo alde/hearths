@@ -2,6 +2,10 @@
 
 A WoW addon that randomly picks a hearthstone toy from your collection, with LiteMount-style priorities, cooldown handling, Shaman Astral Recall support, and a collection browser that tells you where to get the ones you're missing.
 
+![Collection page: collected hearthstones with priorities, missing ones with where to get them](screenshot-2.png)
+
+![General settings](screenshot-1.png)
+
 ## What it does
 
 Creates and manages a macro named `HEARTHS_BTN` that casts a random hearthstone from your collection. Drag it to your action bars from the settings window or from `/macro`.

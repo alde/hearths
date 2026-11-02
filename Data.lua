@@ -82,7 +82,7 @@ Data.HEARTHSTONES = {
 	{ id = 235016, name = "Redeployment Module", category = "vendor", status = "available", expansion = "The War Within",
 		source = "Reno Jackson - 5,000 Resonance Crystals." },
 	{ id = 263933, name = "Preyseeker's Hearthstone", category = "vendor", status = "available", expansion = "Midnight",
-		source = "Construct V'anore in Silvermoon - 800 Remnants of Anguish. Requires Preyseeker's Journey rank 6." },
+		source = "Construct E'nui in Silvermoon - 800 Remnants of Anguish. Requires Preyseeker's Journey rank 6." },
 	{ id = 265100, name = "Corewarden's Hearthstone", category = "vendor", status = "available", expansion = "Midnight",
 		source = "Telemancer Astrandis in Silvermoon - 10 Voidlight Marl. Requires Delver's Journey rank 10." },
 
